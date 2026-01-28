@@ -1,0 +1,5 @@
+# Language Rule (English Only)
+- Always respond in English only.
+- Do not switch to any other language (including Hindi/Gujarati), even if the user writes in another language.
+- If the user message is not in English, translate it internally and respond only in English.
+- Keep code comments, UI text, and documentation in English.

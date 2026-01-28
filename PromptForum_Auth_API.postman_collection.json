@@ -1,0 +1,1465 @@
+{
+  "info": {
+    "name": "PromptForum Complete API",
+    "description": "Complete API for PromptForum: Authentication, Categories (with Top), Tags, Posts (with Filters), Comments/Answers, and WYSIWYG File Uploads",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "3.3.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_email",
+      "value": "test@example.com",
+      "type": "string"
+    },
+    {
+      "key": "test_password",
+      "value": "Test123456",
+      "type": "string"
+    },
+    {
+      "key": "otp_code",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "category_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "post_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "comment_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "1. Sign Up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('✅ Signup successful! Check your email for OTP.');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email}}\",\n  \"password\": \"{{test_password}}\",\n  \"full_name\": \"Test User\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/signup",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "signup"]
+            },
+            "description": "Register a new user with email and password. Sends OTP to email for verification."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Verify Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.access_token) {",
+                  "        pm.collectionVariables.set('access_token', response.data.access_token);",
+                  "        pm.collectionVariables.set('refresh_token', response.data.refresh_token);",
+                  "        console.log('✅ Email verified! Tokens saved to collection variables.');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email}}\",\n  \"otp_code\": \"{{otp_code}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/verify-email",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "verify-email"]
+            },
+            "description": "Verify email with OTP code. Returns access and refresh tokens on success."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.access_token) {",
+                  "        pm.collectionVariables.set('access_token', response.data.access_token);",
+                  "        pm.collectionVariables.set('refresh_token', response.data.refresh_token);",
+                  "        console.log('✅ Login successful! Tokens saved.');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email}}\",\n  \"password\": \"{{test_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Login with email and password. Returns access and refresh tokens."
+          },
+          "response": []
+        },
+        {
+          "name": "4. Google OAuth",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.access_token) {",
+                  "        pm.collectionVariables.set('access_token', response.data.access_token);",
+                  "        pm.collectionVariables.set('refresh_token', response.data.refresh_token);",
+                  "        console.log('✅ Google login successful! Tokens saved.');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"YOUR_GOOGLE_OAUTH_TOKEN_HERE\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/google",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "google"]
+            },
+            "description": "Login with Google OAuth token. Creates new user if doesn't exist."
+          },
+          "response": []
+        },
+        {
+          "name": "5. Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            },
+            "description": "Get current authenticated user information. Requires access token."
+          },
+          "response": []
+        },
+        {
+          "name": "6. Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.access_token) {",
+                  "        pm.collectionVariables.set('access_token', response.data.access_token);",
+                  "        pm.collectionVariables.set('refresh_token', response.data.refresh_token);",
+                  "        console.log('✅ Token refreshed! New tokens saved.');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "refresh"]
+            },
+            "description": "Refresh access token using refresh token. Returns new tokens."
+          },
+          "response": []
+        },
+        {
+          "name": "7. Forgot Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/forgot-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "forgot-password"]
+            },
+            "description": "Request password reset. Sends OTP to email if user exists."
+          },
+          "response": []
+        },
+        {
+          "name": "8. Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email}}\",\n  \"otp_code\": \"{{otp_code}}\",\n  \"new_password\": \"NewPassword123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/reset-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "reset-password"]
+            },
+            "description": "Reset password using OTP code from email."
+          },
+          "response": []
+        },
+        {
+          "name": "9. Resend OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/resend-otp",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "resend-otp"]
+            },
+            "description": "Resend OTP code to email."
+          },
+          "response": []
+        },
+        {
+          "name": "10. Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "logout"]
+            },
+            "description": "Logout current user. Client should delete tokens."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "Get All Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories/all",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories", "all"]
+            },
+            "description": "Get all categories in flat list"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Category Tree",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.categories && response.data.categories.length > 0) {",
+                  "        const firstCategory = response.data.categories[0];",
+                  "        pm.collectionVariables.set('category_id', firstCategory.id);",
+                  "        console.log('✅ Category ID saved:', firstCategory.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories/tree",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories", "tree"]
+            },
+            "description": "Get categories in tree structure (parents with subcategories)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Parent Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories/parent",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories", "parent"]
+            },
+            "description": "Get only parent categories"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Category by Slug",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories/prompts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories", "prompts"]
+            },
+            "description": "Get single category by slug"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Categories - Top/Popular",
+      "item": [
+        {
+          "name": "Get Top Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories/top?limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories", "top"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Number of top categories (default: 10, max: 50)"
+                }
+              ]
+            },
+            "description": "Get top categories by post count (like Stack Overflow's popular tags sidebar)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Tags",
+      "item": [
+        {
+          "name": "Get All Tags",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/tags/all",
+              "host": ["{{base_url}}"],
+              "path": ["api", "tags", "all"]
+            },
+            "description": "Get all tags"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Popular Tags",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/tags/popular?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "tags", "popular"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Get most popular/used tags"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Tags by Group",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/tags/group/Prompt Types",
+              "host": ["{{base_url}}"],
+              "path": ["api", "tags", "group", "Prompt Types"]
+            },
+            "description": "Get tags from specific group"
+          },
+          "response": []
+        },
+        {
+          "name": "Search Tags",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/tags/search?q=prompt",
+              "host": ["{{base_url}}"],
+              "path": ["api", "tags", "search"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "prompt"
+                }
+              ]
+            },
+            "description": "Search tags by name"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Forum Posts",
+      "item": [
+        {
+          "name": "Create Post (with files)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.post && response.data.post.id) {",
+                  "        pm.collectionVariables.set('post_id', response.data.post.id);",
+                  "        console.log('✅ Post created! ID:', response.data.post.id);",
+                  "        console.log('✅ Slug:', response.data.post.slug);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "How to create effective ChatGPT prompts?",
+                  "type": "text"
+                },
+                {
+                  "key": "category_id",
+                  "value": "{{category_id}}",
+                  "type": "text",
+                  "description": "Get from /api/categories/tree"
+                },
+                {
+                  "key": "subcategory_id",
+                  "value": "",
+                  "type": "text",
+                  "description": "Optional"
+                },
+                {
+                  "key": "tags",
+                  "value": "chatgpt,prompt-engineering,few-shot",
+                  "type": "text",
+                  "description": "Comma-separated tags (auto-creates if not exists)"
+                },
+                {
+                  "key": "body",
+                  "value": "I'm looking for best practices and techniques to create effective prompts for ChatGPT. What are some proven strategies?",
+                  "type": "text"
+                },
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": [],
+                  "description": "Upload images, PDFs, videos, etc (max 5 files)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/posts/create",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "create"]
+            },
+            "description": "Create a new forum post with optional file attachments"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/all?page=1&limit=20&sort_by=created_at&sort_order=desc",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "all"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "category_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "subcategory_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "tag",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "author_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "is_solved",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "sort_by",
+                  "value": "created_at",
+                  "description": "created_at, upvote_count, reply_count, view_count"
+                },
+                {
+                  "key": "sort_order",
+                  "value": "desc",
+                  "description": "asc or desc"
+                }
+              ]
+            },
+            "description": "Get all posts with filters and pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Posts by Category",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/all?category_id={{category_id}}&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "all"],
+              "query": [
+                {
+                  "key": "category_id",
+                  "value": "{{category_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get posts from specific category"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Trending Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/all?sort_by=upvote_count&sort_order=desc&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "all"],
+              "query": [
+                {
+                  "key": "sort_by",
+                  "value": "upvote_count"
+                },
+                {
+                  "key": "sort_order",
+                  "value": "desc"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Get most upvoted posts"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Unsolved Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/all?is_solved=false",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "all"],
+              "query": [
+                {
+                  "key": "is_solved",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "Get unsolved questions"
+          },
+          "response": []
+        },
+        {
+          "name": "Search Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/search?q=chatgpt&page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "search"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "chatgpt"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Search posts by title or body content"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Post by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/{{post_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "{{post_id}}"]
+            },
+            "description": "Get single post by ID (increments view count)"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Updated Post Title",
+                  "type": "text",
+                  "description": "Optional"
+                },
+                {
+                  "key": "body",
+                  "value": "Updated post content with more details...",
+                  "type": "text",
+                  "description": "Optional"
+                },
+                {
+                  "key": "tags",
+                  "value": "updated-tag,another-tag",
+                  "type": "text",
+                  "description": "Optional"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/posts/{{post_id}}/update",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "{{post_id}}", "update"]
+            },
+            "description": "Update a post (author only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Upvote Post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "vote_type",
+                  "value": "upvote",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/posts/{{post_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "{{post_id}}", "vote"]
+            },
+            "description": "Upvote a post"
+          },
+          "response": []
+        },
+        {
+          "name": "Downvote Post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "vote_type",
+                  "value": "downvote",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/posts/{{post_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "{{post_id}}", "vote"]
+            },
+            "description": "Downvote a post"
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Post as Solved",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/posts/{{post_id}}/solve",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "{{post_id}}", "solve"]
+            },
+            "description": "Mark post as solved (author only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Pin Post (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/posts/{{post_id}}/pin",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "{{post_id}}", "pin"]
+            },
+            "description": "Toggle post pin status (admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Lock Post (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/posts/{{post_id}}/lock",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "{{post_id}}", "lock"]
+            },
+            "description": "Toggle post lock status (admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/posts/{{post_id}}/delete",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "{{post_id}}", "delete"]
+            },
+            "description": "Delete a post (author only)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Forum Posts - Filters",
+      "item": [
+        {
+          "name": "Get Active Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/filter/active?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "filter", "active"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get recently active posts (sorted by recent activity)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Unanswered Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/filter/unanswered?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "filter", "unanswered"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get posts with no replies"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Answered Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/filter/answered?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "filter", "answered"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get posts with at least one reply"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Trending Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/filter/trending?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "filter", "trending"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get trending posts (high activity in last 7 days)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Posts Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/posts/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "posts", "stats"]
+            },
+            "description": "Get post counts for all filter categories (for badges)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Forum Comments/Answers",
+      "item": [
+        {
+          "name": "Create Comment/Answer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.comment && response.data.comment.id) {",
+                  "        pm.collectionVariables.set('comment_id', response.data.comment.id);",
+                  "        console.log('✅ Comment created! ID:', response.data.comment.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "body",
+                  "value": "Great question! The most reliable method is using the Character Reference (--cref) parameter. Here's my proven workflow...",
+                  "type": "text"
+                },
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": [],
+                  "description": "Upload solution code, images, etc (optional)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/comments/{{post_id}}/create",
+              "host": ["{{base_url}}"],
+              "path": ["api", "comments", "{{post_id}}", "create"]
+            },
+            "description": "Create a new answer/comment on a post with optional file attachments"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Comments (Sorted)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/comments/{{post_id}}/all?sort_by=upvote_count&sort_order=desc",
+              "host": ["{{base_url}}"],
+              "path": ["api", "comments", "{{post_id}}", "all"],
+              "query": [
+                {
+                  "key": "sort_by",
+                  "value": "upvote_count",
+                  "description": "created_at or upvote_count"
+                },
+                {
+                  "key": "sort_order",
+                  "value": "desc",
+                  "description": "asc or desc"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all comments for a post. Returns accepted solution first, then other comments sorted by score or time."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Comments by Newest",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/comments/{{post_id}}/all?sort_by=created_at&sort_order=asc",
+              "host": ["{{base_url}}"],
+              "path": ["api", "comments", "{{post_id}}", "all"],
+              "query": [
+                {
+                  "key": "sort_by",
+                  "value": "created_at"
+                },
+                {
+                  "key": "sort_order",
+                  "value": "asc"
+                }
+              ]
+            },
+            "description": "Get comments sorted by oldest first"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "body",
+                  "value": "Updated answer with more details...",
+                  "type": "text",
+                  "description": "Optional - new body content"
+                },
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": [],
+                  "description": "Optional - new file attachments"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/comments/{{comment_id}}/update",
+              "host": ["{{base_url}}"],
+              "path": ["api", "comments", "{{comment_id}}", "update"]
+            },
+            "description": "Update a comment (author only). Sets is_edited flag."
+          },
+          "response": []
+        },
+        {
+          "name": "Upvote Comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "vote_type",
+                  "value": "upvote",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/comments/{{comment_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": ["api", "comments", "{{comment_id}}", "vote"]
+            },
+            "description": "Upvote a comment. Click again to remove upvote."
+          },
+          "response": []
+        },
+        {
+          "name": "Downvote Comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "vote_type",
+                  "value": "downvote",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/comments/{{comment_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": ["api", "comments", "{{comment_id}}", "vote"]
+            },
+            "description": "Downvote a comment. Click again to remove downvote."
+          },
+          "response": []
+        },
+        {
+          "name": "Accept as Solution",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/comments/{{comment_id}}/accept",
+              "host": ["{{base_url}}"],
+              "path": ["api", "comments", "{{comment_id}}", "accept"]
+            },
+            "description": "Mark comment as accepted solution (post author only). Shows green checkmark."
+          },
+          "response": []
+        },
+        {
+          "name": "Unaccept Solution",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/comments/{{comment_id}}/unaccept",
+              "host": ["{{base_url}}"],
+              "path": ["api", "comments", "{{comment_id}}", "unaccept"]
+            },
+            "description": "Remove accepted solution status (post author only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/comments/{{comment_id}}/delete",
+              "host": ["{{base_url}}"],
+              "path": ["api", "comments", "{{comment_id}}", "delete"]
+            },
+            "description": "Delete a comment (author only). Soft delete."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "File Upload (WYSIWYG)",
+      "item": [
+        {
+          "name": "Upload File for Editor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.url) {",
+                  "        console.log('✅ File uploaded!');",
+                  "        console.log('URL:', response.data.url);",
+                  "        console.log('Markdown:', response.data.markdown);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Select image/video/document to upload"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/files/upload",
+              "host": ["{{base_url}}"],
+              "path": ["api", "files", "upload"]
+            },
+            "description": "Upload a single file for inline embedding in WYSIWYG editor.\n\nReturns:\n- URL for embedding\n- Markdown syntax for easy insertion\n- File metadata\n\nUse this endpoint from your rich text editor (Toast UI, TinyMCE, etc.) to upload images/videos and get back URLs for inline embedding."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "Root",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "Check if API is running"
+          },
+          "response": []
+        },
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Health check endpoint"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
