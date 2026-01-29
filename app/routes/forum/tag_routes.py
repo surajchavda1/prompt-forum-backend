@@ -252,3 +252,101 @@ async def delete_tag(
         return error_response(
             message="Failed to delete tag"
         )
+
+
+@router.post("/recalculate-counts")
+async def recalculate_tag_counts(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Recalculate usage counts for all tags based on actual post usage.
+    
+    This endpoint:
+    - Counts how many active posts use each tag
+    - Updates the usage_count field for all tags
+    - Returns statistics about the recalculation
+    
+    Admin only - add permission check later.
+    
+    Use this when:
+    - Tag counts seem incorrect
+    - After data migration
+    - After bulk post operations
+    """
+    if not current_user:
+        return error_response(
+            message="Authentication required",
+            status_code=401
+        )
+    
+    db = Database.get_db()
+    tag_service = TagService(db)
+    
+    # Get all active posts
+    posts = await db.posts.find({
+        "$or": [
+            {"is_deleted": {"$exists": False}},
+            {"is_deleted": False}
+        ]
+    }).to_list(length=None)
+    
+    # Count tag usage in posts
+    tag_usage = {}
+    posts_with_tags = 0
+    
+    for post in posts:
+        post_tags = post.get("tags", [])
+        if post_tags:
+            posts_with_tags += 1
+            for tag_slug in post_tags:
+                tag_usage[tag_slug] = tag_usage.get(tag_slug, 0) + 1
+    
+    # Get all tags
+    all_tags = await tag_service.get_all_tags()
+    
+    # Update each tag
+    updated_count = 0
+    fixed_tags = []
+    
+    for tag in all_tags:
+        tag_slug = tag["slug"]
+        actual_count = tag_usage.get(tag_slug, 0)
+        current_count = tag.get("usage_count", 0)
+        
+        # Update if different
+        if current_count != actual_count:
+            await tag_service.update_tag(
+                str(tag["_id"]),
+                {"usage_count": actual_count}
+            )
+            updated_count += 1
+            fixed_tags.append({
+                "name": tag["name"],
+                "slug": tag_slug,
+                "old_count": current_count,
+                "new_count": actual_count
+            })
+    
+    # Get top used tags
+    top_tags = sorted(tag_usage.items(), key=lambda x: x[1], reverse=True)[:10]
+    top_tags_list = [{"slug": slug, "count": count} for slug, count in top_tags]
+    
+    # Get tags with zero usage
+    zero_usage_tags = [tag["name"] for tag in all_tags if tag_usage.get(tag["slug"], 0) == 0]
+    
+    return success_response(
+        message="Tag counts recalculated successfully",
+        data={
+            "summary": {
+                "total_posts": len(posts),
+                "posts_with_tags": posts_with_tags,
+                "unique_tags_used": len(tag_usage),
+                "total_tags_in_db": len(all_tags),
+                "tags_updated": updated_count,
+                "tags_with_zero_usage": len(zero_usage_tags)
+            },
+            "fixed_tags": fixed_tags,
+            "top_10_tags": top_tags_list,
+            "zero_usage_tags": zero_usage_tags[:20]  # First 20 only
+        }
+    )

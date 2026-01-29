@@ -24,6 +24,10 @@ async def get_current_user(
     db: AsyncIOMotorDatabase = Depends(get_database)
 ) -> dict:
     """Get current authenticated user"""
+    # Check if token exists
+    if token is None:
+        return None
+    
     # Verify token
     token_data = security_service.verify_token(token, "access")
     if token_data is None or token_data.email is None:

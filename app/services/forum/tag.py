@@ -96,3 +96,42 @@ class TagService:
             {"_id": ObjectId(tag_id)},
             {"$inc": {"usage_count": 1}}
         )
+    
+    async def decrement_usage_count(self, tag_id: str):
+        """Decrement usage count for a tag"""
+        await self.collection.update_one(
+            {"_id": ObjectId(tag_id)},
+            {"$inc": {"usage_count": -1}}
+        )
+    
+    async def recalculate_usage_counts(self):
+        """Recalculate usage counts for all tags based on actual post usage"""
+        # Get all posts
+        posts = await self.db.posts.find({
+            "$or": [
+                {"is_deleted": {"$exists": False}},
+                {"is_deleted": False}
+            ]
+        }).to_list(length=None)
+        
+        # Count tag usage
+        tag_usage = {}
+        for post in posts:
+            post_tags = post.get("tags", [])
+            for tag_slug in post_tags:
+                tag_usage[tag_slug] = tag_usage.get(tag_slug, 0) + 1
+        
+        # Update all tags
+        all_tags = await self.get_all_tags()
+        for tag in all_tags:
+            tag_slug = tag["slug"]
+            actual_count = tag_usage.get(tag_slug, 0)
+            
+            # Update if different
+            if tag.get("usage_count", 0) != actual_count:
+                await self.collection.update_one(
+                    {"_id": tag["_id"]},
+                    {"$set": {"usage_count": actual_count, "updated_at": datetime.utcnow()}}
+                )
+        
+        return len(all_tags)

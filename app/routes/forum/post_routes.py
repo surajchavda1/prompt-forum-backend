@@ -101,6 +101,8 @@ async def create_post(
                     group="Community",
                     color="#06B6D4"
                 )
+                # Increment usage count for newly created tag
+                await tag_service.increment_usage_count(str(new_tag["_id"]))
                 tag_list.append(tag_name)
     
     # Handle file uploads

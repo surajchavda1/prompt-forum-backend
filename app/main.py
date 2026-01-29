@@ -14,6 +14,12 @@ from app.routes.forum.tag_routes import router as tag_router
 from app.routes.forum.post_routes import router as post_router
 from app.routes.forum.comment_routes import router as comment_router
 from app.routes.files.upload_routes import router as upload_router
+from app.routes.contest.contest_routes import router as contest_router
+from app.routes.contest.task_routes import router as task_router
+from app.routes.contest.submission_routes import contest_router as contest_submission_router, submission_router
+from app.routes.contest.leaderboard_routes import router as leaderboard_router
+from app.routes.contest.user_contests_routes import router as user_contests_router
+from app.routes.search.search_routes import router as search_router
 
 # Load environment variables
 load_dotenv()
@@ -63,6 +69,13 @@ app.include_router(tag_router, prefix="/api")
 app.include_router(post_router, prefix="/api")
 app.include_router(comment_router, prefix="/api")
 app.include_router(upload_router, prefix="/api")
+app.include_router(contest_router, prefix="/api")
+app.include_router(task_router, prefix="/api")
+app.include_router(contest_submission_router, prefix="/api")  # Contest-specific submission routes
+app.include_router(submission_router, prefix="/api")  # Generic submission operations
+app.include_router(leaderboard_router, prefix="/api")
+app.include_router(user_contests_router)  # User contest routes (already has /api prefix)
+app.include_router(search_router, prefix="/api")  # Global search
 
 # Mount uploads directory for static file serving
 uploads_path = Path("uploads")
