@@ -39,7 +39,7 @@ class AuditEntry(BaseModel):
     contest_id: str
     action: AuditAction
     user_id: str
-    user_name: str
+    username: str
     entity_type: str  # "contest", "task", "submission", "participant"
     entity_id: Optional[str] = None
     changes: Optional[Dict[str, Any]] = None  # What changed

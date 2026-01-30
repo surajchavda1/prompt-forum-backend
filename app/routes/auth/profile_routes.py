@@ -253,6 +253,55 @@ async def upload_cover_image(
         return error_response(message=f"Failed to upload file: {str(e)}")
 
 
+@router.get("/@{username}/questions")
+async def get_user_questions_by_username(
+    username: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("created_at", regex="^(created_at|upvote_count|view_count)$")
+):
+    """
+    Get all questions posted by a user (by username).
+    
+    Public endpoint - sorted by date, votes, or views.
+    Example: /api/users/@john_doe/questions
+    """
+    db = Database.get_db()
+    profile_service = ProfileService(db)
+    
+    # Find user by username first
+    user = await profile_service.get_user_by_username(username)
+    if not user:
+        return error_response(
+            message="User not found",
+            status_code=404
+        )
+    
+    user_id = str(user["_id"])
+    
+    posts, total = await profile_service.get_user_posts(
+        user_id=user_id,
+        page=page,
+        limit=limit,
+        sort_by=sort_by
+    )
+    
+    total_pages = (total + limit - 1) // limit
+    
+    return success_response(
+        message="Questions retrieved successfully",
+        data={
+            "questions": posts,
+            "pagination": {
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "total_pages": total_pages
+            }
+        }
+    )
+
+
 @router.get("/{user_id}/questions")
 async def get_user_questions(
     user_id: str,
@@ -261,9 +310,10 @@ async def get_user_questions(
     sort_by: str = Query("created_at", regex="^(created_at|upvote_count|view_count)$")
 ):
     """
-    Get all questions posted by a user.
+    Get all questions posted by a user (by user ID).
     
     Public endpoint - sorted by date, votes, or views.
+    For shareable URLs, use /@{username}/questions instead.
     """
     db = Database.get_db()
     profile_service = ProfileService(db)
@@ -291,6 +341,55 @@ async def get_user_questions(
     )
 
 
+@router.get("/@{username}/answers")
+async def get_user_answers_by_username(
+    username: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("created_at", regex="^(created_at|upvote_count)$")
+):
+    """
+    Get all answers posted by a user (by username).
+    
+    Public endpoint - includes post title and link.
+    Example: /api/users/@john_doe/answers
+    """
+    db = Database.get_db()
+    profile_service = ProfileService(db)
+    
+    # Find user by username first
+    user = await profile_service.get_user_by_username(username)
+    if not user:
+        return error_response(
+            message="User not found",
+            status_code=404
+        )
+    
+    user_id = str(user["_id"])
+    
+    answers, total = await profile_service.get_user_answers(
+        user_id=user_id,
+        page=page,
+        limit=limit,
+        sort_by=sort_by
+    )
+    
+    total_pages = (total + limit - 1) // limit
+    
+    return success_response(
+        message="Answers retrieved successfully",
+        data={
+            "answers": answers,
+            "pagination": {
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "total_pages": total_pages
+            }
+        }
+    )
+
+
 @router.get("/{user_id}/answers")
 async def get_user_answers(
     user_id: str,
@@ -299,9 +398,10 @@ async def get_user_answers(
     sort_by: str = Query("created_at", regex="^(created_at|upvote_count)$")
 ):
     """
-    Get all answers posted by a user.
+    Get all answers posted by a user (by user ID).
     
     Public endpoint - includes post title and link.
+    For shareable URLs, use /@{username}/answers instead.
     """
     db = Database.get_db()
     profile_service = ProfileService(db)
@@ -329,12 +429,46 @@ async def get_user_answers(
     )
 
 
+@router.get("/@{username}/statistics")
+async def get_user_statistics_by_username(username: str):
+    """
+    Get user statistics by username (reputation, badges, ranks).
+    
+    Lightweight endpoint for displaying user stats without full profile.
+    Example: /api/users/@john_doe/statistics
+    """
+    db = Database.get_db()
+    profile_service = ProfileService(db)
+    
+    # Find user by username
+    user = await profile_service.get_user_by_username(username)
+    if not user:
+        return error_response(
+            message="User not found",
+            status_code=404
+        )
+    
+    user_id = str(user["_id"])
+    
+    stats = await profile_service.calculate_user_statistics(user_id)
+    badges = await profile_service.calculate_user_badges(user_id, stats)
+    
+    return success_response(
+        message="Statistics retrieved successfully",
+        data={
+            "statistics": stats,
+            "badges": badges
+        }
+    )
+
+
 @router.get("/{user_id}/statistics")
 async def get_user_statistics(user_id: str):
     """
-    Get user statistics only (reputation, badges, ranks).
+    Get user statistics by user ID (reputation, badges, ranks).
     
     Lightweight endpoint for displaying user stats without full profile.
+    For shareable URLs, use /@{username}/statistics instead.
     """
     db = Database.get_db()
     profile_service = ProfileService(db)
@@ -362,15 +496,47 @@ async def get_user_statistics(user_id: str):
     )
 
 
+@router.get("/@{username}/top-tags")
+async def get_user_top_tags_by_username(
+    username: str,
+    limit: int = Query(10, ge=1, le=50)
+):
+    """
+    Get user's most used tags (by username).
+    
+    Shows which topics the user is most active in.
+    Example: /api/users/@john_doe/top-tags
+    """
+    db = Database.get_db()
+    profile_service = ProfileService(db)
+    
+    # Find user by username
+    user = await profile_service.get_user_by_username(username)
+    if not user:
+        return error_response(
+            message="User not found",
+            status_code=404
+        )
+    
+    user_id = str(user["_id"])
+    top_tags = await profile_service.get_user_top_tags(user_id, limit=limit)
+    
+    return success_response(
+        message="Top tags retrieved successfully",
+        data={"top_tags": top_tags}
+    )
+
+
 @router.get("/{user_id}/top-tags")
 async def get_user_top_tags(
     user_id: str,
     limit: int = Query(10, ge=1, le=50)
 ):
     """
-    Get user's most used tags.
+    Get user's most used tags (by user ID).
     
     Shows which topics the user is most active in.
+    For shareable URLs, use /@{username}/top-tags instead.
     """
     db = Database.get_db()
     profile_service = ProfileService(db)
@@ -383,15 +549,47 @@ async def get_user_top_tags(
     )
 
 
+@router.get("/@{username}/top-posts")
+async def get_user_top_posts_by_username(
+    username: str,
+    limit: int = Query(4, ge=1, le=20)
+):
+    """
+    Get user's highest voted posts (by username).
+    
+    Shows user's best contributions.
+    Example: /api/users/@john_doe/top-posts
+    """
+    db = Database.get_db()
+    profile_service = ProfileService(db)
+    
+    # Find user by username
+    user = await profile_service.get_user_by_username(username)
+    if not user:
+        return error_response(
+            message="User not found",
+            status_code=404
+        )
+    
+    user_id = str(user["_id"])
+    top_posts = await profile_service.get_user_top_posts(user_id, limit=limit)
+    
+    return success_response(
+        message="Top posts retrieved successfully",
+        data={"top_posts": top_posts}
+    )
+
+
 @router.get("/{user_id}/top-posts")
 async def get_user_top_posts(
     user_id: str,
     limit: int = Query(4, ge=1, le=20)
 ):
     """
-    Get user's highest voted posts.
+    Get user's highest voted posts (by user ID).
     
     Shows user's best contributions.
+    For shareable URLs, use /@{username}/top-posts instead.
     """
     db = Database.get_db()
     profile_service = ProfileService(db)

@@ -154,11 +154,11 @@ class ProfileService:
             # Total views (sum of all user's questions)
             total_views = sum(post.get("view_count", 0) for post in user_posts)
             
-            # Calculate global rank (based on reputation)
-            users_with_higher_rep = await self.users_collection.count_documents({
-                "reputation": {"$gt": reputation}
-            })
-            global_rank = users_with_higher_rep + 1
+            # Calculate global rank using leaderboard service (proper rank calculation)
+            from app.services.contest.leaderboard import LeaderboardService
+            leaderboard_service = LeaderboardService(self.db)
+            rank_info = await leaderboard_service.get_user_rank(user_id)
+            global_rank = rank_info.get("rank")
             
             return {
                 "reputation": reputation,

@@ -19,6 +19,63 @@ class ContestService:
         self.submissions = db.contest_submissions
         self.audit_service = AuditService(db)
     
+    def _get_owner_username_lookup_pipeline(self) -> List[Dict]:
+        """
+        Returns aggregation pipeline stages to lookup owner info from users collection.
+        Adds 'username', 'owner_full_name', 'owner_profile_picture' fields and updates 'owner_name'.
+        """
+        return [
+            # Convert owner_id string to ObjectId for lookup
+            {
+                "$addFields": {
+                    "owner_oid": {"$toObjectId": "$owner_id"}
+                }
+            },
+            # Lookup user from users collection
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "owner_oid",
+                    "foreignField": "_id",
+                    "as": "owner_info"
+                }
+            },
+            # Extract user fields from owner_info array
+            {
+                "$addFields": {
+                    "username": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$owner_info.username", 0]},
+                            "$owner_name"  # Fallback to stored owner_name
+                        ]
+                    },
+                    "owner_full_name": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$owner_info.full_name", 0]},
+                            "$owner_name"  # Fallback to stored owner_name
+                        ]
+                    },
+                    # Override owner_name with current full_name from users collection
+                    "owner_name": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$owner_info.full_name", 0]},
+                            "$owner_name"  # Keep stored value if lookup fails
+                        ]
+                    },
+                    "owner_profile_picture": {
+                        "$arrayElemAt": ["$owner_info.profile_picture", 0]
+                    }
+                }
+            },
+            # Remove temporary fields
+            {
+                "$project": {
+                    "owner_oid": 0,
+                    "owner_info": 0
+                }
+            }
+        ]
+    
     @staticmethod
     def generate_slug(title: str, contest_id: str = None) -> str:
         """Generate URL-friendly slug from title"""
@@ -171,7 +228,7 @@ class ContestService:
                 contest_id=str(result.inserted_id),
                 action=AuditAction.CONTEST_CREATED,
                 user_id=owner_id,
-                user_name=owner_name,
+                username=owner_name,
                 entity_type="contest",
                 entity_id=str(result.inserted_id),
                 metadata={
@@ -192,9 +249,16 @@ class ContestService:
         contest_id: str,
         user_id: Optional[str] = None
     ) -> Optional[Dict]:
-        """Get contest by ID with calculated fields"""
+        """Get contest by ID with calculated fields, includes owner username"""
         try:
-            contest = await self.contests.find_one({"_id": ObjectId(contest_id)})
+            # Use aggregation to get owner username
+            pipeline = [
+                {"$match": {"_id": ObjectId(contest_id)}},
+                *self._get_owner_username_lookup_pipeline()
+            ]
+            cursor = self.contests.aggregate(pipeline)
+            contests = await cursor.to_list(length=1)
+            contest = contests[0] if contests else None
             
             if not contest:
                 return None
@@ -265,32 +329,40 @@ class ContestService:
         limit: int = 20,
         user_id: Optional[str] = None
     ) -> Tuple[List[Dict], int]:
-        """Get contests with filtering"""
+        """Get contests with filtering, includes owner username"""
         try:
-            query = {}
+            match_query = {}
             
             if status:
                 # Convert enum to string value if needed
-                query["status"] = status.value if hasattr(status, 'value') else status
+                match_query["status"] = status.value if hasattr(status, 'value') else status
             if category:
-                query["category"] = category
+                match_query["category"] = category
             if difficulty:
                 # Convert enum to string value if needed
-                query["difficulty"] = difficulty.value if hasattr(difficulty, 'value') else difficulty
+                match_query["difficulty"] = difficulty.value if hasattr(difficulty, 'value') else difficulty
             if owner_id:
                 # If specific owner_id requested, use it
-                query["owner_id"] = owner_id
+                match_query["owner_id"] = owner_id
             else:
                 # Otherwise, filter out old contests without owner_id
-                query["owner_id"] = {"$exists": True}
+                match_query["owner_id"] = {"$exists": True}
             
             skip = (page - 1) * limit
             
-            contests = await self.contests.find(query).sort(
-                "created_at", -1
-            ).skip(skip).limit(limit).to_list(length=limit)
+            # Use aggregation to get owner username
+            pipeline = [
+                {"$match": match_query},
+                {"$sort": {"created_at": -1}},
+                {"$skip": skip},
+                {"$limit": limit},
+                *self._get_owner_username_lookup_pipeline()
+            ]
             
-            total = await self.contests.count_documents(query)
+            cursor = self.contests.aggregate(pipeline)
+            contests = await cursor.to_list(length=limit)
+            
+            total = await self.contests.count_documents(match_query)
             
             # Add calculated fields for each contest
             for contest in contests:
@@ -388,7 +460,7 @@ class ContestService:
                 contest_id=contest_id,
                 action=AuditAction.CONTEST_UPDATED,
                 user_id=user_id,
-                user_name=contest.get("owner_name", "Unknown"),
+                username=contest.get("owner_name", "Unknown"),
                 entity_type="contest",
                 entity_id=contest_id,
                 changes=update_dict,
@@ -487,7 +559,7 @@ class ContestService:
                 contest_id=contest_id,
                 action=AuditAction.CONTEST_STARTED,
                 user_id=user_id,
-                user_name=contest.get("owner_name", "Unknown"),
+                username=contest.get("owner_name", "Unknown"),
                 entity_type="contest",
                 entity_id=contest_id,
                 metadata={
@@ -537,7 +609,7 @@ class ContestService:
         self,
         contest_id: str,
         user_id: str,
-        user_name: str
+        username: str
     ) -> Tuple[bool, str]:
         """User joins a contest"""
         try:
@@ -571,7 +643,7 @@ class ContestService:
             participant = {
                 "contest_id": contest_id,
                 "user_id": user_id,
-                "user_name": user_name,
+                "username": username,
                 "joined_at": datetime.utcnow(),
                 "total_score": 0,
                 "approved_tasks": 0,
@@ -586,7 +658,7 @@ class ContestService:
                 contest_id=contest_id,
                 action=AuditAction.USER_JOINED,
                 user_id=user_id,
-                user_name=user_name,
+                username=username,
                 entity_type="participant",
                 entity_id=str(participant["_id"]) if "_id" in participant else None,
                 metadata={

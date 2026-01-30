@@ -263,6 +263,7 @@ class ContestWidgetsService:
             
             return {
                 "owner_id": owner_id,
+                "username": owner.get("username") or owner.get("full_name") or owner.get("email", "").split("@")[0],
                 "owner_name": owner.get("full_name") or owner.get("email", "").split("@")[0],
                 "owner_email": owner.get("email"),
                 "profile_picture": owner.get("profile_picture"),
@@ -397,7 +398,7 @@ class ContestWidgetsService:
                 activities.append({
                     "type": activity_type,
                     "user_id": submission.get("user_id"),
-                    "user_name": submission.get("user_name"),
+                    "username": submission.get("username"),
                     "message": message,
                     "task_title": task_title,
                     "timestamp": timestamp,
@@ -419,7 +420,7 @@ class ContestWidgetsService:
                 activities.append({
                     "type": "join",
                     "user_id": participant.get("user_id"),
-                    "user_name": participant.get("user_name"),
+                    "username": participant.get("username"),
                     "message": " joined the contest",
                     "timestamp": joined_at
                 })
@@ -506,7 +507,7 @@ class ContestWidgetsService:
                 if user_id not in user_stats:
                     user_stats[user_id] = {
                         "user_id": user_id,
-                        "user_name": submission.get("user_name"),
+                        "username": submission.get("username"),
                         "approved_count": 0,
                         "total_points": 0,
                         "submissions_count": 0

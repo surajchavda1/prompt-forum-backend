@@ -156,8 +156,8 @@ class LeaderboardService:
                 # Store user data with all calculated fields
                 user_reputations.append({
                     "user_id": user_id,
-                    "user_name": user.get("full_name") or user.get("email", "").split("@")[0],
                     "username": user.get("username") or user.get("full_name") or user.get("email", "").split("@")[0],
+                    "full_name": user.get("full_name") or user.get("email", "").split("@")[0],
                     "profile_picture": user.get("profile_picture"),
                     "reputation": reputation,
                     "total_answers": total_answers,
@@ -214,6 +214,7 @@ class LeaderboardService:
                         "trend": user.get("trend", "stable"),
                         "total_users": len(top_contributors),
                         "username": user["username"],
+                        "full_name": user.get("full_name"),
                         "profile_picture": user.get("profile_picture")
                     }
             
@@ -229,6 +230,7 @@ class LeaderboardService:
                 "trend": "stable",
                 "total_users": len(top_contributors),
                 "username": None,
+                "full_name": None,
                 "profile_picture": None
             }
             
@@ -245,5 +247,6 @@ class LeaderboardService:
                 "trend": "stable",
                 "total_users": 0,
                 "username": None,
+                "full_name": None,
                 "profile_picture": None
             }

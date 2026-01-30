@@ -11,6 +11,63 @@ class CommentService:
         self.db = db
         self.collection = db.comments
     
+    def _get_username_lookup_pipeline(self) -> List[dict]:
+        """
+        Returns aggregation pipeline stages to lookup user info from users collection.
+        Adds 'username', 'full_name', 'profile_picture' fields and updates 'author_name'.
+        """
+        return [
+            # Convert author_id string to ObjectId for lookup
+            {
+                "$addFields": {
+                    "author_oid": {"$toObjectId": "$author_id"}
+                }
+            },
+            # Lookup user from users collection
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "author_oid",
+                    "foreignField": "_id",
+                    "as": "author_info"
+                }
+            },
+            # Extract user fields from author_info array
+            {
+                "$addFields": {
+                    "username": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$author_info.username", 0]},
+                            "$author_name"  # Fallback to stored author_name
+                        ]
+                    },
+                    "full_name": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$author_info.full_name", 0]},
+                            "$author_name"  # Fallback to stored author_name
+                        ]
+                    },
+                    # Override author_name with current full_name from users collection
+                    "author_name": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$author_info.full_name", 0]},
+                            "$author_name"  # Keep stored value if lookup fails
+                        ]
+                    },
+                    "profile_picture": {
+                        "$arrayElemAt": ["$author_info.profile_picture", 0]
+                    }
+                }
+            },
+            # Remove temporary fields
+            {
+                "$project": {
+                    "author_oid": 0,
+                    "author_info": 0
+                }
+            }
+        ]
+    
     async def create_comment(
         self,
         post_id: str,
@@ -57,9 +114,15 @@ class CommentService:
         return comment
     
     async def get_comment_by_id(self, comment_id: str) -> Optional[dict]:
-        """Get comment by ID"""
+        """Get comment by ID, includes author username"""
         try:
-            return await self.collection.find_one({"_id": ObjectId(comment_id)})
+            pipeline = [
+                {"$match": {"_id": ObjectId(comment_id)}},
+                *self._get_username_lookup_pipeline()
+            ]
+            cursor = self.collection.aggregate(pipeline)
+            comments = await cursor.to_list(length=1)
+            return comments[0] if comments else None
         except:
             return None
     
@@ -73,7 +136,7 @@ class CommentService:
         include_replies: bool = False  # NEW: Option to include/exclude replies
     ) -> List[dict]:
         """
-        Get all top-level comments for a post with sorting
+        Get all top-level comments for a post with sorting, includes author username.
         (excludes nested replies by default)
         
         sort_by: created_at, upvote_count
@@ -83,8 +146,8 @@ class CommentService:
         skip = (page - 1) * limit
         sort_direction = -1 if sort_order == "desc" else 1
         
-        # Build query - only top-level answers by default (exclude post comments and replies)
-        query = {
+        # Build match query - only top-level answers by default (exclude post comments and replies)
+        match_query = {
             "post_id": post_id,
             "$and": [
                 # Not deleted
@@ -106,17 +169,22 @@ class CommentService:
         
         # Filter for top-level comments only (exclude nested replies)
         if not include_replies:
-            query["$and"].append({
+            match_query["$and"].append({
                 "$or": [
                     {"parent_id": None},
                     {"parent_id": {"$exists": False}}
                 ]
             })
         
-        cursor = self.collection.find(query).sort(
-            sort_by, sort_direction
-        ).skip(skip).limit(limit)
+        pipeline = [
+            {"$match": match_query},
+            {"$sort": {sort_by: sort_direction}},
+            {"$skip": skip},
+            {"$limit": limit},
+            *self._get_username_lookup_pipeline()
+        ]
         
+        cursor = self.collection.aggregate(pipeline)
         return await cursor.to_list(length=limit)
     
     async def count_comments(self, post_id: str, include_replies: bool = False) -> int:
@@ -359,15 +427,24 @@ class CommentService:
             return False
     
     async def get_replies(self, comment_id: str, skip: int = 0, limit: int = 50) -> List[dict]:
-        """Get all replies to a specific comment (excludes deleted)"""
-        cursor = self.collection.find({
-            "parent_id": comment_id,
-            "$or": [
-                {"is_deleted": {"$exists": False}},
-                {"is_deleted": False}
-            ]
-        }).sort("created_at", 1).skip(skip).limit(limit)
+        """Get all replies to a specific comment (excludes deleted), includes author username"""
+        pipeline = [
+            {
+                "$match": {
+                    "parent_id": comment_id,
+                    "$or": [
+                        {"is_deleted": {"$exists": False}},
+                        {"is_deleted": False}
+                    ]
+                }
+            },
+            {"$sort": {"created_at": 1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            *self._get_username_lookup_pipeline()
+        ]
         
+        cursor = self.collection.aggregate(pipeline)
         return await cursor.to_list(length=limit)
     
     async def count_replies(self, comment_id: str) -> int:

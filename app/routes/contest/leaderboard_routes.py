@@ -91,8 +91,8 @@ async def get_my_rank(current_user: dict = Depends(get_current_user)):
     
     rank_info = await leaderboard_service.get_user_rank(str(current_user["_id"]))
     
-    # Add user's name
-    rank_info["user_name"] = current_user.get("full_name", current_user.get("email", "").split("@")[0])
+    # Add user's username
+    rank_info["username"] = current_user.get("username") or current_user.get("full_name") or current_user.get("email", "").split("@")[0]
     
     return success_response(
         message="Your rank retrieved successfully",

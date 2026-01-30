@@ -102,7 +102,7 @@ async def create_comment(
         comment = await comment_service.create_comment(
             post_id=post_id,
             author_id=str(current_user["_id"]),
-            author_name=current_user.get("full_name", current_user.get("email")),
+            author_name=current_user.get("full_name") or current_user.get("email"),
             body=body,
             attachments=attachments,
             is_post_comment=False  # This is an ANSWER, not a comment on question
@@ -535,7 +535,7 @@ async def reply_to_comment(
             post_id=parent_comment["post_id"],  # Same post as parent
             parent_id=comment_id,  # Reference to parent comment
             author_id=str(current_user["_id"]),
-            author_name=current_user.get("full_name", current_user.get("email")),
+            author_name=current_user.get("full_name") or current_user.get("email"),
             body=body,
             attachments=attachments,
             is_post_comment=False  # This is a reply to answer, not question comment

@@ -19,12 +19,59 @@ class SubmissionService:
         self.participants = db.contest_participants
         self.audit_service = AuditService(db)
     
+    def _get_username_lookup_pipeline(self) -> List[Dict]:
+        """
+        Returns aggregation pipeline stages to lookup user info from users collection.
+        Adds 'username', 'full_name', and 'profile_picture' fields to each document.
+        """
+        return [
+            # Convert user_id string to ObjectId for lookup
+            {
+                "$addFields": {
+                    "user_oid": {"$toObjectId": "$user_id"}
+                }
+            },
+            # Lookup user from users collection
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "user_oid",
+                    "foreignField": "_id",
+                    "as": "user_info"
+                }
+            },
+            # Extract user fields from user_info array
+            {
+                "$addFields": {
+                    "username": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$user_info.username", 0]},
+                            "$username"  # Keep existing if lookup fails
+                        ]
+                    },
+                    "full_name": {
+                        "$arrayElemAt": ["$user_info.full_name", 0]
+                    },
+                    "profile_picture": {
+                        "$arrayElemAt": ["$user_info.profile_picture", 0]
+                    }
+                }
+            },
+            # Remove temporary fields
+            {
+                "$project": {
+                    "user_oid": 0,
+                    "user_info": 0
+                }
+            }
+        ]
+    
     async def create_submission(
         self,
         contest_id: str,
         task_id: str,
         user_id: str,
-        user_name: str,
+        username: str,
         submission_data: SubmissionCreate,
         attachments: List[dict] = None
     ) -> Tuple[bool, str, Optional[Dict]]:
@@ -87,7 +134,7 @@ class SubmissionService:
                 "contest_id": contest_id,
                 "task_id": task_id,
                 "user_id": user_id,
-                "user_name": user_name,
+                "username": username,
                 "content": submission_data.content,
                 "proof_url": submission_data.proof_url,
                 "attachments": attachments if attachments else [],
@@ -120,7 +167,7 @@ class SubmissionService:
                 contest_id=contest_id,
                 action=AuditAction.SUBMISSION_CREATED,
                 user_id=user_id,
-                user_name=user_name,
+                username=username,
                 entity_type="submission",
                 entity_id=str(result.inserted_id),
                 metadata={
@@ -137,10 +184,15 @@ class SubmissionService:
             return False, f"Failed to create submission: {str(e)}", None
     
     async def get_submission_by_id(self, submission_id: str) -> Optional[Dict]:
-        """Get a submission by ID"""
+        """Get a submission by ID, includes username lookup"""
         try:
-            submission = await self.submissions.find_one({"_id": ObjectId(submission_id)})
-            return submission
+            pipeline = [
+                {"$match": {"_id": ObjectId(submission_id)}},
+                *self._get_username_lookup_pipeline()
+            ]
+            cursor = self.submissions.aggregate(pipeline)
+            submissions = await cursor.to_list(length=1)
+            return submissions[0] if submissions else None
         except Exception as e:
             print(f"Error getting submission: {str(e)}")
             return None
@@ -152,7 +204,7 @@ class SubmissionService:
         proof_url: Optional[str],
         attachments: List[dict],
         user_id: str,
-        user_name: str
+        username: str
     ) -> Tuple[bool, str, Optional[Dict]]:
         """
         Submit a revision after owner requests changes.
@@ -193,7 +245,7 @@ class SubmissionService:
                 "contest_id": submission["contest_id"],
                 "task_id": submission["task_id"],
                 "user_id": submission["user_id"],
-                "user_name": submission["user_name"],
+                "username": submission["username"],
                 "version": current_version,
                 "content": submission["content"],
                 "proof_url": submission.get("proof_url"),
@@ -243,7 +295,7 @@ class SubmissionService:
                 contest_id=submission["contest_id"],
                 action=AuditAction.SUBMISSION_CREATED,  # Reuse action or create new one
                 user_id=user_id,
-                user_name=user_name,
+                username=username,
                 entity_type="submission_revision",
                 entity_id=submission_id,
                 metadata={
@@ -445,7 +497,7 @@ class SubmissionService:
                     "contest_id": submission["contest_id"],
                     "task_id": submission["task_id"],
                     "user_id": submission["user_id"],
-                    "user_name": submission["user_name"],
+                    "username": submission["username"],
                     "version": submission.get("version", 1),
                     "content": submission["content"],
                     "proof_url": submission.get("proof_url"),
@@ -513,7 +565,7 @@ class SubmissionService:
                 contest_id=contest_id,
                 action=AuditAction.SUBMISSION_REVIEWED,
                 user_id=reviewer_id,
-                user_name=contest.get("owner_name", "Unknown"),
+                username=contest.get("owner_name", "Unknown"),
                 entity_type="submission",
                 entity_id=submission_id,
                 changes={
@@ -525,7 +577,7 @@ class SubmissionService:
                 metadata={
                     "task_id": submission["task_id"],
                     "participant_id": user_id,
-                    "participant_name": submission.get("user_name", "Unknown"),
+                    "participant_name": submission.get("username", "Unknown"),
                     "feedback_provided": bool(review_data.feedback)
                 }
             )
@@ -542,20 +594,27 @@ class SubmissionService:
         page: int = 1,
         limit: int = 20
     ) -> Tuple[List[Dict], int]:
-        """Get submissions for a task"""
+        """Get submissions for a task, includes username lookup"""
         try:
-            query = {"task_id": task_id}
+            match_query = {"task_id": task_id}
             
             if status:
-                query["status"] = status
+                match_query["status"] = status
             
             skip = (page - 1) * limit
             
-            submissions = await self.submissions.find(query).sort(
-                "submitted_at", -1
-            ).skip(skip).limit(limit).to_list(length=limit)
+            pipeline = [
+                {"$match": match_query},
+                {"$sort": {"submitted_at": -1}},
+                {"$skip": skip},
+                {"$limit": limit},
+                *self._get_username_lookup_pipeline()
+            ]
             
-            total = await self.submissions.count_documents(query)
+            cursor = self.submissions.aggregate(pipeline)
+            submissions = await cursor.to_list(length=limit)
+            
+            total = await self.submissions.count_documents(match_query)
             
             return submissions, total
             
@@ -568,20 +627,42 @@ class SubmissionService:
         contest_id: str,
         user_id: str
     ) -> List[Dict]:
-        """Get all submissions by a user for a contest"""
+        """Get all submissions by a user for a contest, includes username and task info"""
         try:
-            submissions = await self.submissions.find({
-                "contest_id": contest_id,
-                "user_id": user_id
-            }).sort("submitted_at", -1).to_list(length=None)
+            pipeline = [
+                {"$match": {"contest_id": contest_id, "user_id": user_id}},
+                {"$sort": {"submitted_at": -1}},
+                *self._get_username_lookup_pipeline(),
+                # Lookup task info
+                {
+                    "$addFields": {
+                        "task_oid": {"$toObjectId": "$task_id"}
+                    }
+                },
+                {
+                    "$lookup": {
+                        "from": "contest_tasks",
+                        "localField": "task_oid",
+                        "foreignField": "_id",
+                        "as": "task_info"
+                    }
+                },
+                {
+                    "$addFields": {
+                        "task_title": {"$ifNull": [{"$arrayElemAt": ["$task_info.title", 0]}, "Unknown"]},
+                        "task_points": {"$ifNull": [{"$arrayElemAt": ["$task_info.points", 0]}, 0]}
+                    }
+                },
+                {
+                    "$project": {
+                        "task_oid": 0,
+                        "task_info": 0
+                    }
+                }
+            ]
             
-            # Add task info to each submission
-            for submission in submissions:
-                task = await self.tasks.find_one({"_id": ObjectId(submission["task_id"])})
-                submission["task_title"] = task["title"] if task else "Unknown"
-                submission["task_points"] = task["points"] if task else 0
-            
-            return submissions
+            cursor = self.submissions.aggregate(pipeline)
+            return await cursor.to_list(length=None)
             
         except Exception as e:
             print(f"Error getting user submissions: {str(e)}")
@@ -594,27 +675,54 @@ class SubmissionService:
         page: int = 1,
         limit: int = 50
     ) -> Tuple[List[Dict], int]:
-        """Get all submissions for a contest (owner view)"""
+        """Get all submissions for a contest (owner view), includes username and task info"""
         try:
-            query = {"contest_id": contest_id}
+            match_query = {"contest_id": contest_id}
             
             if status:
-                query["status"] = status
+                match_query["status"] = status
             
             skip = (page - 1) * limit
             
-            submissions = await self.submissions.find(query).sort(
-                "submitted_at", -1
-            ).skip(skip).limit(limit).to_list(length=limit)
+            pipeline = [
+                {"$match": match_query},
+                {"$sort": {"submitted_at": -1}},
+                {"$skip": skip},
+                {"$limit": limit},
+                *self._get_username_lookup_pipeline(),
+                # Lookup task info
+                {
+                    "$addFields": {
+                        "task_oid": {"$toObjectId": "$task_id"}
+                    }
+                },
+                {
+                    "$lookup": {
+                        "from": "contest_tasks",
+                        "localField": "task_oid",
+                        "foreignField": "_id",
+                        "as": "task_info"
+                    }
+                },
+                {
+                    "$addFields": {
+                        "task_title": {"$ifNull": [{"$arrayElemAt": ["$task_info.title", 0]}, "Unknown"]},
+                        "task_points": {"$ifNull": [{"$arrayElemAt": ["$task_info.points", 0]}, 0]},
+                        "task_order": {"$ifNull": [{"$arrayElemAt": ["$task_info.order", 0]}, 0]}
+                    }
+                },
+                {
+                    "$project": {
+                        "task_oid": 0,
+                        "task_info": 0
+                    }
+                }
+            ]
             
-            total = await self.submissions.count_documents(query)
+            cursor = self.submissions.aggregate(pipeline)
+            submissions = await cursor.to_list(length=limit)
             
-            # Add task info
-            for submission in submissions:
-                task = await self.tasks.find_one({"_id": ObjectId(submission["task_id"])})
-                submission["task_title"] = task["title"] if task else "Unknown"
-                submission["task_points"] = task["points"] if task else 0
-                submission["task_order"] = task["order"] if task else 0
+            total = await self.submissions.count_documents(match_query)
             
             return submissions, total
             
@@ -627,12 +735,18 @@ class SubmissionService:
         submission_id: str
     ) -> Tuple[Optional[Dict], List[Dict]]:
         """
-        Get full revision history for a submission.
+        Get full revision history for a submission, includes username lookup.
         Returns: (current_submission, revisions_list)
         """
         try:
-            # Get current submission
-            submission = await self.submissions.find_one({"_id": ObjectId(submission_id)})
+            # Get current submission with username lookup
+            pipeline = [
+                {"$match": {"_id": ObjectId(submission_id)}},
+                *self._get_username_lookup_pipeline()
+            ]
+            cursor = self.submissions.aggregate(pipeline)
+            submissions = await cursor.to_list(length=1)
+            submission = submissions[0] if submissions else None
             
             if not submission:
                 return None, []

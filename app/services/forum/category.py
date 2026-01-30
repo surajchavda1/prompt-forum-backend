@@ -10,6 +10,33 @@ class CategoryService:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
         self.collection = db.categories
+        self.posts_collection = db.posts
+    
+    async def _get_category_post_count(self, category_id: str) -> int:
+        """
+        Calculate actual post count for a category from posts collection.
+        Only counts non-deleted posts.
+        """
+        return await self.posts_collection.count_documents({
+            "$or": [
+                {"category_id": category_id},
+                {"subcategory_id": category_id}
+            ],
+            "$and": [
+                {
+                    "$or": [
+                        {"is_deleted": {"$exists": False}},
+                        {"is_deleted": False}
+                    ]
+                }
+            ]
+        })
+    
+    async def _add_post_counts(self, categories: List[Dict]) -> List[Dict]:
+        """Add dynamic post counts to a list of categories"""
+        for category in categories:
+            category["post_count"] = await self._get_category_post_count(str(category["_id"]))
+        return categories
     
     async def create_category(
         self,
@@ -28,7 +55,7 @@ class CategoryService:
             "parent_id": parent_id,
             "icon": icon,
             "order": order,
-            "post_count": 0,
+            "post_count": 0,  # Legacy field, actual count is calculated dynamically
             "is_active": True,
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
@@ -39,39 +66,48 @@ class CategoryService:
         return category
     
     async def get_category_by_slug(self, slug: str) -> Optional[Dict]:
-        """Get category by slug"""
-        return await self.collection.find_one({"slug": slug, "is_active": True})
+        """Get category by slug with dynamic post count"""
+        category = await self.collection.find_one({"slug": slug, "is_active": True})
+        if category:
+            category["post_count"] = await self._get_category_post_count(str(category["_id"]))
+        return category
     
     async def get_category_by_id(self, category_id: str) -> Optional[Dict]:
-        """Get category by ID"""
+        """Get category by ID with dynamic post count"""
         try:
-            return await self.collection.find_one({"_id": ObjectId(category_id), "is_active": True})
+            category = await self.collection.find_one({"_id": ObjectId(category_id), "is_active": True})
+            if category:
+                category["post_count"] = await self._get_category_post_count(str(category["_id"]))
+            return category
         except:
             return None
     
     async def get_all_categories(self) -> List[Dict]:
-        """Get all active categories"""
+        """Get all active categories with dynamic post counts"""
         cursor = self.collection.find({"is_active": True}).sort("order", 1)
-        return await cursor.to_list(length=None)
+        categories = await cursor.to_list(length=None)
+        return await self._add_post_counts(categories)
     
     async def get_parent_categories(self) -> List[Dict]:
-        """Get all parent categories (no parent_id)"""
+        """Get all parent categories (no parent_id) with dynamic post counts"""
         cursor = self.collection.find({
             "parent_id": None,
             "is_active": True
         }).sort("order", 1)
-        return await cursor.to_list(length=None)
+        categories = await cursor.to_list(length=None)
+        return await self._add_post_counts(categories)
     
     async def get_subcategories(self, parent_id: str) -> List[Dict]:
-        """Get subcategories of a parent category"""
+        """Get subcategories of a parent category with dynamic post counts"""
         cursor = self.collection.find({
             "parent_id": parent_id,
             "is_active": True
         }).sort("order", 1)
-        return await cursor.to_list(length=None)
+        categories = await cursor.to_list(length=None)
+        return await self._add_post_counts(categories)
     
     async def get_categories_with_subcategories(self) -> List[Dict]:
-        """Get all parent categories with their subcategories"""
+        """Get all parent categories with their subcategories and dynamic post counts"""
         parents = await self.get_parent_categories()
         
         for parent in parents:
@@ -97,15 +133,16 @@ class CategoryService:
         return result.modified_count > 0
     
     async def increment_post_count(self, category_id: str):
-        """Increment post count for a category"""
-        await self.collection.update_one(
-            {"_id": ObjectId(category_id)},
-            {"$inc": {"post_count": 1}}
-        )
+        """
+        Legacy method - kept for backward compatibility.
+        Post count is now calculated dynamically, so this is a no-op.
+        """
+        # No longer needed - post counts are calculated dynamically
+        pass
     
     async def get_top_categories(self, limit: int = 10) -> List[Dict]:
         """
-        Get top categories sorted by post count.
+        Get top categories sorted by actual post count (calculated dynamically).
         Shows most popular categories like Stack Overflow's tag sidebar.
         
         Args:
@@ -114,9 +151,15 @@ class CategoryService:
         Returns:
             List of categories with highest post counts
         """
-        cursor = self.collection.find({
-            "is_active": True,
-            "post_count": {"$gt": 0}  # Only categories with posts
-        }).sort("post_count", -1).limit(limit)
+        # Get all active categories
+        cursor = self.collection.find({"is_active": True})
+        categories = await cursor.to_list(length=None)
         
-        return await cursor.to_list(length=limit)
+        # Calculate actual post counts
+        categories = await self._add_post_counts(categories)
+        
+        # Filter out categories with 0 posts and sort by post_count descending
+        categories_with_posts = [c for c in categories if c["post_count"] > 0]
+        categories_with_posts.sort(key=lambda x: x["post_count"], reverse=True)
+        
+        return categories_with_posts[:limit]

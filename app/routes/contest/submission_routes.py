@@ -96,7 +96,7 @@ async def submit_task(
         contest_id=contest_id,
         task_id=task_id,
         user_id=str(current_user["_id"]),
-        user_name=current_user.get("full_name", current_user.get("email")),
+        username=current_user.get("username") or current_user.get("full_name") or current_user.get("email"),
         submission_data=submission_data,
         attachments=attachments
     )
@@ -471,7 +471,7 @@ async def submit_revision(
         proof_url=proof_url,
         attachments=attachments,
         user_id=str(current_user["_id"]),
-        user_name=current_user.get("full_name", current_user.get("email"))
+        username=current_user.get("username") or current_user.get("full_name") or current_user.get("email")
     )
     
     if not success:
@@ -587,7 +587,7 @@ async def review_submission(
         submission_id=submission_id,
         review_data=review_data,
         reviewer_id=str(current_user["_id"]),
-        reviewer_name=current_user.get("full_name", current_user.get("email"))
+        reviewer_name=current_user.get("full_name") or current_user.get("email")
     )
     
     if not success:

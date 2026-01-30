@@ -37,7 +37,7 @@ class SubmissionResponse(BaseModel):
     contest_id: str
     task_id: str
     user_id: str
-    user_name: str
+    username: str
     content: str
     proof_url: Optional[str] = None
     attachments: List[dict] = []
@@ -66,7 +66,7 @@ class SubmissionListItem(BaseModel):
     """Simplified submission for listings"""
     id: str
     user_id: str
-    user_name: str
+    username: str
     task_id: str
     task_title: str
     status: SubmissionStatus

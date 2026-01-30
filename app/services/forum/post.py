@@ -12,6 +12,63 @@ class PostService:
         self.db = db
         self.collection = db.posts
     
+    def _get_username_lookup_pipeline(self) -> List[Dict]:
+        """
+        Returns aggregation pipeline stages to lookup user info from users collection.
+        Adds 'username', 'full_name', 'profile_picture' fields and updates 'author_name'.
+        """
+        return [
+            # Convert author_id string to ObjectId for lookup
+            {
+                "$addFields": {
+                    "author_oid": {"$toObjectId": "$author_id"}
+                }
+            },
+            # Lookup user from users collection
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "author_oid",
+                    "foreignField": "_id",
+                    "as": "author_info"
+                }
+            },
+            # Extract user fields from author_info array
+            {
+                "$addFields": {
+                    "username": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$author_info.username", 0]},
+                            "$author_name"  # Fallback to stored author_name
+                        ]
+                    },
+                    "full_name": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$author_info.full_name", 0]},
+                            "$author_name"  # Fallback to stored author_name
+                        ]
+                    },
+                    # Override author_name with current full_name from users collection
+                    "author_name": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$author_info.full_name", 0]},
+                            "$author_name"  # Keep stored value if lookup fails
+                        ]
+                    },
+                    "profile_picture": {
+                        "$arrayElemAt": ["$author_info.profile_picture", 0]
+                    }
+                }
+            },
+            # Remove temporary fields
+            {
+                "$project": {
+                    "author_oid": 0,
+                    "author_info": 0
+                }
+            }
+        ]
+    
     @staticmethod
     def generate_slug(title: str, post_id: str = None) -> str:
         """Generate URL-friendly slug from title"""
@@ -83,15 +140,27 @@ class PostService:
         return post
     
     async def get_post_by_id(self, post_id: str) -> Optional[Dict]:
-        """Get post by ID"""
+        """Get post by ID, includes author username"""
         try:
-            return await self.collection.find_one({"_id": ObjectId(post_id)})
+            pipeline = [
+                {"$match": {"_id": ObjectId(post_id)}},
+                *self._get_username_lookup_pipeline()
+            ]
+            cursor = self.collection.aggregate(pipeline)
+            posts = await cursor.to_list(length=1)
+            return posts[0] if posts else None
         except:
             return None
     
     async def get_post_by_slug(self, slug: str) -> Optional[Dict]:
-        """Get post by slug"""
-        return await self.collection.find_one({"slug": slug})
+        """Get post by slug, includes author username"""
+        pipeline = [
+            {"$match": {"slug": slug}},
+            *self._get_username_lookup_pipeline()
+        ]
+        cursor = self.collection.aggregate(pipeline)
+        posts = await cursor.to_list(length=1)
+        return posts[0] if posts else None
     
     async def get_posts(
         self,
@@ -105,21 +174,31 @@ class PostService:
         sort_by: str = "created_at",
         sort_order: int = -1
     ) -> List[Dict]:
-        """Get posts with filters and pagination"""
-        query = {}
+        """Get posts with filters and pagination, includes author username via lookup"""
+        # Build match query
+        match_query = {}
         
         if category_id:
-            query["category_id"] = category_id
+            match_query["category_id"] = category_id
         if subcategory_id:
-            query["subcategory_id"] = subcategory_id
+            match_query["subcategory_id"] = subcategory_id
         if tag:
-            query["tags"] = tag
+            match_query["tags"] = tag
         if author_id:
-            query["author_id"] = author_id
+            match_query["author_id"] = author_id
         if is_solved is not None:
-            query["is_solved"] = is_solved
+            match_query["is_solved"] = is_solved
         
-        cursor = self.collection.find(query).sort(sort_by, sort_order).skip(skip).limit(limit)
+        # Aggregation pipeline with $lookup to get username
+        pipeline = [
+            {"$match": match_query},
+            {"$sort": {sort_by: sort_order}},
+            {"$skip": skip},
+            {"$limit": limit},
+            *self._get_username_lookup_pipeline()
+        ]
+        
+        cursor = self.collection.aggregate(pipeline)
         return await cursor.to_list(length=limit)
     
     async def count_posts(
@@ -144,31 +223,53 @@ class PostService:
         return await self.collection.count_documents(query)
     
     async def search_posts(self, search_query: str, skip: int = 0, limit: int = 20) -> List[Dict]:
-        """Search posts by title or body"""
-        query = {
+        """Search posts by title or body, includes author username"""
+        match_query = {
             "$or": [
                 {"title": {"$regex": search_query, "$options": "i"}},
                 {"body": {"$regex": search_query, "$options": "i"}}
             ]
         }
         
-        cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
+        pipeline = [
+            {"$match": match_query},
+            {"$sort": {"created_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            *self._get_username_lookup_pipeline()
+        ]
+        
+        cursor = self.collection.aggregate(pipeline)
         return await cursor.to_list(length=limit)
     
     async def get_active_posts(self, skip: int = 0, limit: int = 20) -> List[Dict]:
         """
         Get recently active posts (sorted by updated_at).
-        Posts with recent activity appear first.
+        Posts with recent activity appear first, includes author username.
         """
-        cursor = self.collection.find({}).sort("updated_at", -1).skip(skip).limit(limit)
+        pipeline = [
+            {"$sort": {"updated_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            *self._get_username_lookup_pipeline()
+        ]
+        
+        cursor = self.collection.aggregate(pipeline)
         return await cursor.to_list(length=limit)
     
     async def get_unanswered_posts(self, skip: int = 0, limit: int = 20) -> List[Dict]:
         """
-        Get posts with no replies (reply_count = 0).
+        Get posts with no replies (reply_count = 0), includes author username.
         """
-        query = {"reply_count": 0}
-        cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
+        pipeline = [
+            {"$match": {"reply_count": 0}},
+            {"$sort": {"created_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            *self._get_username_lookup_pipeline()
+        ]
+        
+        cursor = self.collection.aggregate(pipeline)
         return await cursor.to_list(length=limit)
     
     async def count_unanswered_posts(self) -> int:
@@ -177,10 +278,17 @@ class PostService:
     
     async def get_answered_posts(self, skip: int = 0, limit: int = 20) -> List[Dict]:
         """
-        Get posts with at least one reply (reply_count > 0).
+        Get posts with at least one reply (reply_count > 0), includes author username.
         """
-        query = {"reply_count": {"$gt": 0}}
-        cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
+        pipeline = [
+            {"$match": {"reply_count": {"$gt": 0}}},
+            {"$sort": {"created_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            *self._get_username_lookup_pipeline()
+        ]
+        
+        cursor = self.collection.aggregate(pipeline)
         return await cursor.to_list(length=limit)
     
     async def count_answered_posts(self) -> int:
@@ -189,7 +297,7 @@ class PostService:
     
     async def get_trending_posts(self, skip: int = 0, limit: int = 20) -> List[Dict]:
         """
-        Get trending posts from last 7 days based on activity score.
+        Get trending posts from last 7 days based on activity score, includes author username.
         Score = (upvotes * 3) + (replies * 2) + (views * 0.1)
         """
         from datetime import timedelta
@@ -214,15 +322,10 @@ class PostService:
                     }
                 }
             },
-            {
-                "$sort": {"trending_score": -1}
-            },
-            {
-                "$skip": skip
-            },
-            {
-                "$limit": limit
-            }
+            {"$sort": {"trending_score": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            *self._get_username_lookup_pipeline()
         ]
         
         cursor = self.collection.aggregate(pipeline)

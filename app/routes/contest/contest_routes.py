@@ -110,7 +110,7 @@ async def create_contest(
     contest = await contest_service.create_contest(
         contest_data=contest_data,
         owner_id=str(current_user["_id"]),
-        owner_name=current_user.get("full_name", current_user.get("email")),
+        owner_name=current_user.get("full_name") or current_user.get("email"),
         cover_image=cover_image_url
     )
     
@@ -603,7 +603,7 @@ async def join_contest(
     success, message = await contest_service.join_contest(
         contest_id=contest_id,
         user_id=str(current_user["_id"]),
-        user_name=current_user.get("full_name", current_user.get("email"))
+        username=current_user.get("username") or current_user.get("full_name") or current_user.get("email")
     )
     
     if not success:
@@ -698,10 +698,43 @@ async def get_contest_participants(
     
     skip = (page - 1) * limit
     
-    participants = await db.contest_participants.find({
-        "contest_id": contest_id
-    }).sort("joined_at", 1).skip(skip).limit(limit).to_list(length=limit)
+    # Use aggregation with $lookup to get fresh username from users collection
+    pipeline = [
+        {"$match": {"contest_id": contest_id}},
+        {"$sort": {"joined_at": 1}},
+        {"$skip": skip},
+        {"$limit": limit},
+        # Lookup user to get current username
+        {
+            "$lookup": {
+                "from": "users",
+                "let": {"user_id": {"$toObjectId": "$user_id"}},
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$_id", "$$user_id"]}}},
+                    {"$project": {"username": 1, "full_name": 1, "email": 1, "profile_picture": 1}}
+                ],
+                "as": "user_info"
+            }
+        },
+        {"$unwind": {"path": "$user_info", "preserveNullAndEmptyArrays": True}},
+        # Add user fields from lookup
+        {
+            "$addFields": {
+                "username": {
+                    "$ifNull": [
+                        "$user_info.username",
+                        {"$ifNull": ["$user_info.full_name", "$user_name"]}  # Fallback to old user_name
+                    ]
+                },
+                "full_name": "$user_info.full_name",
+                "profile_picture": "$user_info.profile_picture"
+            }
+        },
+        # Remove internal fields
+        {"$project": {"user_info": 0, "user_name": 0}}
+    ]
     
+    participants = await db.contest_participants.aggregate(pipeline).to_list(length=limit)
     total = await db.contest_participants.count_documents({"contest_id": contest_id})
     
     # Convert to JSON
@@ -711,6 +744,11 @@ async def get_contest_participants(
         del p["_id"]
         if p.get("joined_at"):
             p["joined_at"] = p["joined_at"].isoformat()
+        # Ensure user fields are always present
+        if "full_name" not in p:
+            p["full_name"] = None
+        if "profile_picture" not in p:
+            p["profile_picture"] = None
         participants_data.append(p)
     
     return success_response(
@@ -742,10 +780,41 @@ async def get_contest_leaderboard(
     
     skip = (page - 1) * limit
     
-    participants = await db.contest_participants.find({
-        "contest_id": contest_id
-    }).sort("total_score", -1).skip(skip).limit(limit).to_list(length=limit)
+    # Use aggregation with $lookup to get fresh username from users collection
+    pipeline = [
+        {"$match": {"contest_id": contest_id}},
+        {"$sort": {"total_score": -1}},
+        {"$skip": skip},
+        {"$limit": limit},
+        # Lookup user to get current username
+        {
+            "$lookup": {
+                "from": "users",
+                "let": {"user_id": {"$toObjectId": "$user_id"}},
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$_id", "$$user_id"]}}},
+                    {"$project": {"username": 1, "full_name": 1, "profile_picture": 1}}
+                ],
+                "as": "user_info"
+            }
+        },
+        {"$unwind": {"path": "$user_info", "preserveNullAndEmptyArrays": True}},
+        # Add user fields from lookup
+        {
+            "$addFields": {
+                "username": {
+                    "$ifNull": [
+                        "$user_info.username",
+                        {"$ifNull": ["$user_info.full_name", "$user_name"]}
+                    ]
+                },
+                "full_name": "$user_info.full_name",
+                "profile_picture": "$user_info.profile_picture"
+            }
+        }
+    ]
     
+    participants = await db.contest_participants.aggregate(pipeline).to_list(length=limit)
     total = await db.contest_participants.count_documents({"contest_id": contest_id})
     
     # Build leaderboard
@@ -754,7 +823,9 @@ async def get_contest_leaderboard(
         leaderboard.append({
             "rank": idx,
             "user_id": p["user_id"],
-            "user_name": p["user_name"],
+            "username": p.get("username"),
+            "full_name": p.get("full_name"),
+            "profile_picture": p.get("profile_picture"),
             "total_score": p.get("total_score", 0),
             "approved_tasks": p.get("approved_tasks", 0),
             "pending_tasks": p.get("pending_tasks", 0)
