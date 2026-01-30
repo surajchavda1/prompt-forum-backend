@@ -10,12 +10,48 @@ from app.utils.file_upload import FileUploadService
 router = APIRouter(prefix="/api/users", tags=["User Profile"])
 
 
+@router.get("/@{username}/profile")
+async def get_user_profile_by_username(username: str):
+    """
+    Get complete user profile by username (slug).
+    
+    Public endpoint - shareable profile URL.
+    Example: /api/users/@john_doe/profile
+    """
+    db = Database.get_db()
+    profile_service = ProfileService(db)
+    
+    # Find user by username
+    user = await profile_service.get_user_by_username(username)
+    
+    if not user:
+        return error_response(
+            message="User not found",
+            status_code=404
+        )
+    
+    # Get full profile using user_id
+    profile = await profile_service.get_user_profile(str(user["_id"]))
+    
+    if not profile:
+        return error_response(
+            message="User not found",
+            status_code=404
+        )
+    
+    return success_response(
+        message="Profile retrieved successfully",
+        data={"profile": profile}
+    )
+
+
 @router.get("/{user_id}/profile")
 async def get_user_profile(user_id: str):
     """
-    Get complete user profile with statistics, badges, and top content.
+    Get complete user profile by user ID.
     
     Public endpoint - anyone can view user profiles.
+    For shareable URLs, use /@{username}/profile instead.
     """
     db = Database.get_db()
     profile_service = ProfileService(db)
@@ -47,6 +83,7 @@ async def update_own_profile(
     Update current user's profile information.
     
     Requires authentication.
+    Note: Username cannot be changed after registration.
     """
     if not current_user:
         return error_response(

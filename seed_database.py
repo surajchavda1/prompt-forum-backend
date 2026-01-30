@@ -1,5 +1,8 @@
 import asyncio
 import os
+import re
+import random
+import string
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
@@ -464,7 +467,133 @@ async def seed_tags(db):
     print(f"\n[SUCCESS] Tags seeded! Total: {total}")
 
 
-async def main():
+def sanitize_username(base: str) -> str:
+    """
+    Sanitize a string to create a valid username base.
+    - Lowercase
+    - Only alphanumeric characters (no underscores/hyphens in base)
+    """
+    # Convert to lowercase
+    sanitized = base.lower().strip()
+    # Keep only alphanumeric characters
+    sanitized = re.sub(r'[^a-z0-9]', '', sanitized)
+    # Limit length to leave room for suffix (base-xxxxx-xxxxx = 12 chars for suffix)
+    sanitized = sanitized[:20]
+    return sanitized
+
+
+def generate_random_suffix() -> str:
+    """Generate a random suffix in format xxxxx-xxxxx (alphanumeric)"""
+    part1 = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
+    part2 = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
+    return f"{part1}-{part2}"
+
+
+async def is_username_taken(db, username: str) -> bool:
+    """Check if username already exists (case-insensitive)"""
+    existing = await db.users.find_one({
+        "username": {"$regex": f"^{re.escape(username)}$", "$options": "i"}
+    })
+    return existing is not None
+
+
+async def generate_unique_username(db, email: str, full_name: str = None) -> str:
+    """
+    Generate a unique username for a user.
+    Format: {base}-{random5}-{random5}
+    Example: surajchavda-a3b2c-x9y8z
+    """
+    # Determine base username
+    if full_name:
+        base_username = sanitize_username(full_name)
+    else:
+        # Use email prefix
+        email_prefix = email.split('@')[0]
+        base_username = sanitize_username(email_prefix)
+    
+    # Ensure base username is not empty
+    if not base_username:
+        base_username = "user"
+    
+    # Generate username with random suffix
+    # Format: base-xxxxx-xxxxx
+    suffix = generate_random_suffix()
+    username = f"{base_username}-{suffix}"
+    
+    # Verify uniqueness (very rare collision, but check anyway)
+    max_attempts = 5
+    for _ in range(max_attempts):
+        if not await is_username_taken(db, username):
+            return username
+        # Regenerate suffix on collision
+        suffix = generate_random_suffix()
+        username = f"{base_username}-{suffix}"
+    
+    return username
+
+
+async def migrate_usernames(db, force_regenerate: bool = False):
+    """
+    Generate usernames for all users who don't have one.
+    If force_regenerate is True, regenerate usernames for ALL users.
+    """
+    users_collection = db.users
+    
+    print("\n[*] Migrating usernames for existing users...")
+    
+    if force_regenerate:
+        # Get all users
+        users_to_update = await users_collection.find({}).to_list(length=None)
+        print(f"  [INFO] Force regenerating usernames for {len(users_to_update)} users")
+    else:
+        # Find all users without username
+        users_to_update = await users_collection.find({
+            "$or": [
+                {"username": {"$exists": False}},
+                {"username": None},
+                {"username": ""}
+            ]
+        }).to_list(length=None)
+        
+        if not users_to_update:
+            print("  [OK] All users already have usernames!")
+            return
+        
+        print(f"  [INFO] Found {len(users_to_update)} users without username")
+    
+    updated_count = 0
+    for user in users_to_update:
+        email = user.get("email", "")
+        full_name = user.get("full_name")
+        old_username = user.get("username", "N/A")
+        
+        # Generate unique username
+        username = await generate_unique_username(db, email, full_name)
+        
+        # Update user
+        result = await users_collection.update_one(
+            {"_id": user["_id"]},
+            {
+                "$set": {
+                    "username": username,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            updated_count += 1
+            if force_regenerate:
+                print(f"  [OK] {email}: {old_username} -> @{username}")
+            else:
+                print(f"  [OK] {email} -> @{username}")
+        else:
+            print(f"  [FAIL] Could not update {email}")
+    
+    print(f"\n[SUCCESS] Updated {updated_count}/{len(users_to_update)} users with usernames")
+
+
+async def main(force_regenerate_usernames: bool = False):
     """Main seed function"""
     print("=" * 60)
     print("Starting database seed...")
@@ -481,6 +610,9 @@ async def main():
         
         # Seed tags
         await seed_tags(db)
+        
+        # Migrate usernames for existing users
+        await migrate_usernames(db, force_regenerate=force_regenerate_usernames)
         
         print()
         print("=" * 60)
@@ -499,4 +631,12 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import sys
+    
+    # Check for --regenerate-usernames flag
+    force_regenerate = "--regenerate-usernames" in sys.argv
+    
+    if force_regenerate:
+        print("[INFO] Force regenerating ALL usernames with new format")
+    
+    asyncio.run(main(force_regenerate_usernames=force_regenerate))

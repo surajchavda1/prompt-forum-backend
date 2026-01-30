@@ -2,6 +2,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from typing import Optional, Dict, List, Tuple
 from datetime import datetime
 from bson import ObjectId
+import re
 from app.models.auth.profile import (
     UserStatistics,
     Badge,
@@ -20,6 +21,33 @@ class ProfileService:
         self.users_collection = db.users
         self.posts_collection = db.posts
         self.comments_collection = db.comments
+    
+    async def is_username_available(self, username: str, exclude_user_id: Optional[str] = None) -> bool:
+        """
+        Check if a username is available.
+        
+        Args:
+            username: The username to check
+            exclude_user_id: User ID to exclude from check (for updates)
+        
+        Returns:
+            True if username is available, False otherwise
+        """
+        query = {
+            "username": {"$regex": f"^{re.escape(username)}$", "$options": "i"}
+        }
+        
+        if exclude_user_id:
+            query["_id"] = {"$ne": ObjectId(exclude_user_id)}
+        
+        existing = await self.users_collection.find_one(query)
+        return existing is None
+    
+    async def get_user_by_username(self, username: str) -> Optional[Dict]:
+        """Get user by username (case-insensitive)"""
+        return await self.users_collection.find_one({
+            "username": {"$regex": f"^{re.escape(username)}$", "$options": "i"}
+        })
     
     async def get_user_profile(self, user_id: str) -> Optional[Dict]:
         """Get complete user profile with statistics"""
@@ -304,7 +332,7 @@ class ProfileService:
         user_id: str,
         profile_data: ProfileUpdate
     ) -> Tuple[bool, str, Optional[Dict]]:
-        """Update user profile information"""
+        """Update user profile information (username cannot be changed)"""
         try:
             # Build update data (only include non-None fields)
             update_data = {}

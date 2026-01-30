@@ -22,9 +22,8 @@ class UserCreate(UserBase):
 
 
 class UserUpdate(BaseModel):
-    """Schema for user updates"""
+    """Schema for user updates (email and username cannot be changed)"""
     full_name: Optional[str] = None
-    email: Optional[EmailStr] = None
 
 
 class UserResponse(UserBase):
@@ -54,6 +53,7 @@ class UserResponse(UserBase):
 
 class UserInDB(UserBase):
     """Schema for user in database"""
+    username: Optional[str] = None
     hashed_password: Optional[str] = None
     auth_provider: AuthProvider
     google_id: Optional[str] = None

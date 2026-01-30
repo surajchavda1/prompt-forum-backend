@@ -2,6 +2,9 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from typing import Optional, Dict
 from datetime import datetime
 from bson import ObjectId
+import re
+import random
+import string
 from app.models.auth.user import (
     UserCreate,
     UserInDB,
@@ -30,6 +33,73 @@ class AuthService:
         """Get user by email"""
         return await self.users_collection.find_one({"email": email})
     
+    async def get_user_by_username(self, username: str) -> Optional[Dict]:
+        """Get user by username (case-insensitive)"""
+        return await self.users_collection.find_one({
+            "username": {"$regex": f"^{re.escape(username)}$", "$options": "i"}
+        })
+    
+    def _sanitize_username(self, base: str) -> str:
+        """
+        Sanitize a string to create a valid username base.
+        - Lowercase
+        - Only alphanumeric characters (no underscores/hyphens in base)
+        """
+        # Convert to lowercase
+        sanitized = base.lower().strip()
+        # Keep only alphanumeric characters
+        sanitized = re.sub(r'[^a-z0-9]', '', sanitized)
+        # Limit length to leave room for suffix (base-xxxxx-xxxxx = 12 chars for suffix)
+        sanitized = sanitized[:20]
+        return sanitized
+    
+    def _generate_random_suffix(self) -> str:
+        """Generate a random suffix in format xxxxx-xxxxx (alphanumeric)"""
+        part1 = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
+        part2 = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
+        return f"{part1}-{part2}"
+    
+    async def generate_unique_username(
+        self,
+        email: str,
+        full_name: Optional[str] = None
+    ) -> str:
+        """
+        Generate a unique username for the user.
+        Format: {base}-{random5}-{random5}
+        Example: surajchavda-a3b2c-x9y8z
+        
+        This ensures uniqueness without database lookups.
+        """
+        # Determine base username
+        if full_name:
+            base_username = self._sanitize_username(full_name)
+        else:
+            # Use email prefix (part before @)
+            email_prefix = email.split('@')[0]
+            base_username = self._sanitize_username(email_prefix)
+        
+        # Ensure base username is not empty
+        if not base_username:
+            base_username = "user"
+        
+        # Generate username with random suffix
+        # Format: base-xxxxx-xxxxx
+        suffix = self._generate_random_suffix()
+        username = f"{base_username}-{suffix}"
+        
+        # Verify uniqueness (very rare collision, but check anyway)
+        max_attempts = 5
+        for _ in range(max_attempts):
+            existing = await self.get_user_by_username(username)
+            if not existing:
+                return username
+            # Regenerate suffix on collision
+            suffix = self._generate_random_suffix()
+            username = f"{base_username}-{suffix}"
+        
+        return username
+    
     async def get_user_by_id(self, user_id: str) -> Optional[Dict]:
         """Get user by ID"""
         try:
@@ -46,10 +116,14 @@ class AuthService:
         google_id: Optional[str] = None,
         is_verified: bool = False
     ) -> Dict:
-        """Create a new user"""
+        """Create a new user with a unique username"""
+        # Generate unique username
+        username = await self.generate_unique_username(email, full_name)
+        
         user_data = UserInDB(
             email=email,
             full_name=full_name,
+            username=username,
             hashed_password=security_service.get_password_hash(password) if password else None,
             auth_provider=auth_provider,
             google_id=google_id,
