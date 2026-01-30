@@ -137,15 +137,24 @@ async def get_top_categories(limit: int = 10):
     )
 
 
-@router.get("/{slug}")
-async def get_category_by_slug(slug: str):
+@router.get("/{identifier}")
+async def get_category(identifier: str):
     """
-    Get a single category by slug.
+    Get a single category by ID or slug.
+    
+    - If identifier is a valid 24-character hex string, treats it as category_id
+    - Otherwise, treats it as a slug
     """
     db = Database.get_db()
     category_service = CategoryService(db)
     
-    category = await category_service.get_category_by_slug(slug)
+    # Check if identifier is a valid ObjectId (24 hex characters)
+    is_object_id = len(identifier) == 24 and all(c in '0123456789abcdef' for c in identifier.lower())
+    
+    if is_object_id:
+        category = await category_service.get_category_by_id(identifier)
+    else:
+        category = await category_service.get_category_by_slug(identifier)
     
     if not category:
         return error_response(

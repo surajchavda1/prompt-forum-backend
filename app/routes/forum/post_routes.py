@@ -173,8 +173,8 @@ async def create_post(
 
 @router.get("/all")
 async def get_all_posts(
-    category_id: Optional[str] = Query(None),
-    subcategory_id: Optional[str] = Query(None),
+    category_id: Optional[str] = Query(None, description="Category ID or slug"),
+    subcategory_id: Optional[str] = Query(None, description="Subcategory ID or slug"),
     tag: Optional[str] = Query(None),
     author_id: Optional[str] = Query(None),
     is_solved: Optional[bool] = Query(None),
@@ -186,8 +186,8 @@ async def get_all_posts(
     """
     Get all posts with filters and pagination.
     
-    - **category_id**: Filter by category
-    - **subcategory_id**: Filter by subcategory
+    - **category_id**: Filter by category (accepts ID or slug)
+    - **subcategory_id**: Filter by subcategory (accepts ID or slug)
     - **tag**: Filter by tag
     - **author_id**: Filter by author
     - **is_solved**: Filter by solved status
@@ -198,13 +198,51 @@ async def get_all_posts(
     """
     db = Database.get_db()
     post_service = PostService(db)
+    category_service = CategoryService(db)
+    
+    # Resolve category_id (accept both ID and slug)
+    # Smart detection: if it's a subcategory, search in subcategory_id instead
+    resolved_category_id = None
+    resolved_subcategory_id = None
+    
+    if category_id:
+        is_object_id = len(category_id) == 24 and all(c in '0123456789abcdef' for c in category_id.lower())
+        if is_object_id:
+            # Check if this ID is a subcategory
+            cat = await category_service.get_category_by_id(category_id)
+            if cat and cat.get("parent_id"):
+                # It's a subcategory, search in subcategory_id
+                resolved_subcategory_id = category_id
+            else:
+                resolved_category_id = category_id
+        else:
+            # Look up by slug
+            category = await category_service.get_category_by_slug(category_id)
+            if category:
+                cat_id = str(category["_id"])
+                if category.get("parent_id"):
+                    # It's a subcategory, search in subcategory_id
+                    resolved_subcategory_id = cat_id
+                else:
+                    resolved_category_id = cat_id
+    
+    # Handle explicit subcategory_id parameter (accept both ID and slug)
+    if subcategory_id:
+        is_object_id = len(subcategory_id) == 24 and all(c in '0123456789abcdef' for c in subcategory_id.lower())
+        if is_object_id:
+            resolved_subcategory_id = subcategory_id
+        else:
+            # Look up by slug
+            subcategory = await category_service.get_category_by_slug(subcategory_id)
+            if subcategory:
+                resolved_subcategory_id = str(subcategory["_id"])
     
     skip = (page - 1) * limit
     sort_dir = -1 if sort_order == "desc" else 1
     
     posts = await post_service.get_posts(
-        category_id=category_id,
-        subcategory_id=subcategory_id,
+        category_id=resolved_category_id,
+        subcategory_id=resolved_subcategory_id,
         tag=tag,
         author_id=author_id,
         is_solved=is_solved,
@@ -215,8 +253,8 @@ async def get_all_posts(
     )
     
     total = await post_service.count_posts(
-        category_id=category_id,
-        subcategory_id=subcategory_id,
+        category_id=resolved_category_id,
+        subcategory_id=resolved_subcategory_id,
         tag=tag,
         author_id=author_id
     )
@@ -425,44 +463,24 @@ async def search_posts(
     )
 
 
-@router.get("/{post_id}")
-async def get_post_by_id(post_id: str):
+@router.get("/{identifier}")
+async def get_post(identifier: str):
     """
-    Get a single post by ID and increment view count.
-    """
-    db = Database.get_db()
-    post_service = PostService(db)
+    Get a single post by ID or slug and increment view count.
     
-    post = await post_service.get_post_by_id(post_id)
-    
-    if not post:
-        return error_response(
-            message="Post not found",
-            status_code=404
-        )
-    
-    # Increment view count
-    await post_service.increment_view_count(post_id)
-    post["view_count"] = post.get("view_count", 0) + 1
-    
-    # Convert to JSON
-    convert_post_to_json(post)
-    
-    return success_response(
-        message="Post retrieved successfully",
-        data={"post": post}
-    )
-
-
-@router.get("/slug/{slug}")
-async def get_post_by_slug(slug: str):
-    """
-    Get a single post by slug and increment view count.
+    - If identifier is a valid 24-character hex string, treats it as post_id
+    - Otherwise, treats it as a slug
     """
     db = Database.get_db()
     post_service = PostService(db)
     
-    post = await post_service.get_post_by_slug(slug)
+    # Check if identifier is a valid ObjectId (24 hex characters)
+    is_object_id = len(identifier) == 24 and all(c in '0123456789abcdef' for c in identifier.lower())
+    
+    if is_object_id:
+        post = await post_service.get_post_by_id(identifier)
+    else:
+        post = await post_service.get_post_by_slug(identifier)
     
     if not post:
         return error_response(

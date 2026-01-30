@@ -314,6 +314,7 @@ class ProfileService:
                 top_posts.append({
                     "id": str(post["_id"]),
                     "title": post.get("title"),
+                    "slug": post.get("slug"),
                     "upvote_count": post.get("upvote_count", 0),
                     "view_count": post.get("view_count", 0),
                     "reply_count": post.get("reply_count", 0),

@@ -365,18 +365,31 @@ async def get_joined_contests(
         )
 
 
-@router.get("/{contest_id}")
+@router.get("/{identifier}")
 async def get_contest(
-    contest_id: str,
+    identifier: str,
     current_user: Optional[dict] = Depends(get_current_user)
 ):
-    """Get contest details"""
+    """
+    Get contest details by ID or slug.
+    
+    - If identifier is a valid 24-character hex string, treats it as contest_id
+    - Otherwise, treats it as a slug
+    """
     db = Database.get_db()
     contest_service = ContestService(db)
     
     user_id = str(current_user["_id"]) if current_user else None
     
-    contest = await contest_service.get_contest_by_id(contest_id, user_id)
+    # Check if identifier is a valid ObjectId (24 hex characters)
+    is_object_id = len(identifier) == 24 and all(c in '0123456789abcdef' for c in identifier.lower())
+    
+    if is_object_id:
+        contest = await contest_service.get_contest_by_id(identifier, user_id)
+        contest_id = identifier
+    else:
+        contest = await contest_service.get_contest_by_slug(identifier, user_id)
+        contest_id = str(contest["_id"]) if contest else None
     
     if not contest:
         return error_response(

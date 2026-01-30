@@ -319,6 +319,83 @@ class ContestService:
             print(f"Error getting contest: {str(e)}")
             return None
     
+    async def get_contest_by_slug(
+        self,
+        slug: str,
+        user_id: Optional[str] = None
+    ) -> Optional[Dict]:
+        """Get contest by slug with calculated fields, includes owner username"""
+        try:
+            # Use aggregation to get owner username
+            pipeline = [
+                {"$match": {"slug": slug}},
+                *self._get_owner_username_lookup_pipeline()
+            ]
+            cursor = self.contests.aggregate(pipeline)
+            contests = await cursor.to_list(length=1)
+            contest = contests[0] if contests else None
+            
+            if not contest:
+                return None
+            
+            contest_id = str(contest["_id"])
+            
+            # Count tasks
+            task_count = await self.tasks.count_documents({"contest_id": contest_id})
+            
+            # Count participants
+            participant_count = await self.participants.count_documents({"contest_id": contest_id})
+            
+            # Count submissions
+            submission_count = await self.submissions.count_documents({"contest_id": contest_id})
+            
+            # Calculate permissions and fields
+            is_owner = str(contest["owner_id"]) == user_id if user_id else False
+            
+            # Check if user joined
+            is_joined = False
+            if user_id:
+                participant = await self.participants.find_one({
+                    "contest_id": contest_id,
+                    "user_id": user_id
+                })
+                is_joined = participant is not None
+            
+            # Can edit/delete only if owner and contest is in DRAFT status
+            can_edit = is_owner and contest["status"] == ContestStatus.DRAFT
+            can_delete = is_owner and contest["status"] == ContestStatus.DRAFT
+            
+            # Add calculated fields
+            contest["task_count"] = task_count
+            contest["current_participants"] = participant_count
+            contest["submission_count"] = submission_count
+            contest["fill_percentage"] = (participant_count / contest["max_participants"]) * 100
+            contest["time_remaining"] = self._calculate_time_remaining(contest["end_date"])
+            contest["time_until_start"] = self._calculate_time_until_start(contest["start_date"])
+            contest["is_joined"] = is_joined
+            contest["is_owner"] = is_owner
+            contest["can_edit"] = can_edit
+            contest["can_delete"] = can_delete
+            
+            # Update status if needed
+            current_status = self._calculate_status(
+                contest["start_date"],
+                contest["end_date"],
+                contest["status"]
+            )
+            if current_status != contest["status"] and contest["status"] != ContestStatus.COMPLETED:
+                await self.contests.update_one(
+                    {"_id": ObjectId(contest_id)},
+                    {"$set": {"status": current_status}}
+                )
+                contest["status"] = current_status
+            
+            return contest
+            
+        except Exception as e:
+            print(f"Error getting contest by slug: {str(e)}")
+            return None
+    
     async def get_contests(
         self,
         status: Optional[str] = None,
