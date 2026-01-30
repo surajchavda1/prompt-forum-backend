@@ -62,7 +62,7 @@ async def create_post(
     category_service = CategoryService(db)
     tag_service = TagService(db)
     
-    # Validate category exists
+    # Validate category exists and is a parent category (not a subcategory)
     category = await category_service.get_category_by_id(category_id)
     if not category:
         return validation_error_response(
@@ -70,13 +70,26 @@ async def create_post(
             errors={"category_id": "Category not found"}
         )
     
+    # Ensure the main category is not a subcategory
+    if category.get("parent_id"):
+        return validation_error_response(
+            message="Invalid category",
+            errors={"category_id": "Cannot use a subcategory as the main category"}
+        )
+    
     # Validate subcategory if provided
     if subcategory_id:
         subcategory = await category_service.get_category_by_id(subcategory_id)
-        if not subcategory or subcategory.get("parent_id") != category_id:
+        if not subcategory:
             return validation_error_response(
                 message="Invalid subcategory",
-                errors={"subcategory_id": "Subcategory not found or doesn't belong to selected category"}
+                errors={"subcategory_id": "Subcategory not found"}
+            )
+        # Ensure subcategory belongs to the specified parent category
+        if subcategory.get("parent_id") != category_id:
+            return validation_error_response(
+                message="Invalid subcategory",
+                errors={"subcategory_id": "Subcategory doesn't belong to the selected category"}
             )
     
     # Process tags
@@ -492,6 +505,7 @@ async def update_post(
     
     db = Database.get_db()
     post_service = PostService(db)
+    category_service = CategoryService(db)
     
     # Check if post exists and user is author
     post = await post_service.get_post_by_id(post_id)
@@ -507,6 +521,37 @@ async def update_post(
             status_code=403
         )
     
+    # Validate category if provided
+    effective_category_id = category_id or post.get("category_id")
+    if category_id:
+        category = await category_service.get_category_by_id(category_id)
+        if not category:
+            return validation_error_response(
+                message="Invalid category",
+                errors={"category_id": "Category not found"}
+            )
+        # If category is a subcategory (has parent), reject it
+        if category.get("parent_id"):
+            return validation_error_response(
+                message="Invalid category",
+                errors={"category_id": "Cannot use a subcategory as the main category"}
+            )
+    
+    # Validate subcategory if provided
+    if subcategory_id:
+        subcategory = await category_service.get_category_by_id(subcategory_id)
+        if not subcategory:
+            return validation_error_response(
+                message="Invalid subcategory",
+                errors={"subcategory_id": "Subcategory not found"}
+            )
+        # Validate subcategory belongs to the (new or existing) parent category
+        if subcategory.get("parent_id") != effective_category_id:
+            return validation_error_response(
+                message="Invalid subcategory",
+                errors={"subcategory_id": "Subcategory doesn't belong to the selected category"}
+            )
+    
     # Build update data
     update_data = {}
     if title:
@@ -514,7 +559,7 @@ async def update_post(
     if category_id:
         update_data["category_id"] = category_id
     if subcategory_id is not None:
-        update_data["subcategory_id"] = subcategory_id
+        update_data["subcategory_id"] = subcategory_id if subcategory_id else None
     if body:
         update_data["body"] = body
     if tags is not None:
