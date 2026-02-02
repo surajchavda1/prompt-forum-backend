@@ -11,6 +11,23 @@ from datetime import datetime
 router = APIRouter(prefix="/comments", tags=["Forum Comments"])
 
 
+async def resolve_post_id(identifier: str, post_service: PostService) -> Optional[str]:
+    """
+    Resolve post identifier to actual post_id.
+    Accepts both ObjectId and slug.
+    """
+    is_object_id = len(identifier) == 24 and all(c in '0123456789abcdef' for c in identifier.lower())
+    
+    if is_object_id:
+        return identifier
+    else:
+        # Look up by slug
+        post = await post_service.get_post_by_slug(identifier)
+        if post:
+            return str(post["_id"])
+        return None
+
+
 def convert_comment_to_json(comment: dict) -> dict:
     """Convert comment document to JSON-serializable format"""
     comment["id"] = str(comment["_id"])
@@ -33,15 +50,15 @@ def convert_comment_to_json(comment: dict) -> dict:
     return comment
 
 
-@router.post("/{post_id}/create")
+@router.post("/{post_identifier}/create")
 async def create_comment(
-    post_id: str,
+    post_identifier: str,
     body: str = Form(..., min_length=10),
     files: List[UploadFile] = File(default=[]),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Create a new comment/answer on a post.
+    Create a new comment/answer on a post (accepts post ID or slug).
     
     Features:
     - Rich text body content
@@ -58,7 +75,12 @@ async def create_comment(
     post_service = PostService(db)
     comment_service = CommentService(db)
     
-    # Verify post exists
+    # Resolve post identifier to ID
+    post_id = await resolve_post_id(post_identifier, post_service)
+    if not post_id:
+        return error_response(message="Post not found", status_code=404)
+    
+    # Verify post exists and get details
     post = await post_service.get_post_by_id(post_id)
     if not post:
         return error_response(
@@ -132,16 +154,16 @@ async def create_comment(
         )
 
 
-@router.get("/{post_id}/all")
+@router.get("/{post_identifier}/all")
 async def get_comments(
-    post_id: str,
+    post_identifier: str,
     sort_by: str = Query("created_at", pattern="^(created_at|upvote_count)$"),
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100)
 ):
     """
-    Get all comments for a post.
+    Get all comments for a post (accepts post ID or slug).
     
     Sorting options:
     - created_at (asc/desc) - Oldest/Newest first
@@ -150,6 +172,11 @@ async def get_comments(
     db = Database.get_db()
     comment_service = CommentService(db)
     post_service = PostService(db)
+    
+    # Resolve post identifier to ID
+    post_id = await resolve_post_id(post_identifier, post_service)
+    if not post_id:
+        return error_response(message="Post not found", status_code=404)
     
     # Verify post exists
     post = await post_service.get_post_by_id(post_id)

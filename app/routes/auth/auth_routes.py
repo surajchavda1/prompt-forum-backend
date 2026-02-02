@@ -286,7 +286,9 @@ async def get_current_user_info(
     user_data = {
         "id": str(current_user["_id"]),
         "email": current_user["email"],
+        "username": current_user.get("username"),
         "full_name": current_user.get("full_name"),
+        "profile_picture": current_user.get("profile_picture"),
         "auth_provider": current_user.get("auth_provider"),
         "is_verified": current_user.get("is_verified"),
         "is_active": current_user.get("is_active"),
@@ -296,7 +298,7 @@ async def get_current_user_info(
     
     return success_response(
         message="User info retrieved successfully",
-        data=user_data
+        data={"user": user_data}
     )
 
 

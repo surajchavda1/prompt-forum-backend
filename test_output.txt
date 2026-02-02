@@ -1,8 +1,0 @@
-﻿python : SyntaxError: Non-UTF-8 code starting with '\xc3' in file E:\PromptForum\backend\test_real_reputation_flow.py 
-on line 238, but no encoding declared; see https://peps.python.org/pep-0263/ for details
-At C:\Users\suraj\AppData\Local\Temp\ps-script-531326f4-9798-4e1f-8690-889a17ede24b.ps1:91 char:1
-+ python test_real_reputation_flow.py 2>&1 | Out-File -Encoding UTF8 te ...
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (SyntaxError: No...63/ for details:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 

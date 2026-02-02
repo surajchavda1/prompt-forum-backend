@@ -4,6 +4,7 @@ from datetime import datetime
 from bson import ObjectId
 from app.database import Database
 from app.services.contest.submission import SubmissionService
+from app.services.contest.contest import ContestService
 from app.routes.auth.dependencies import get_current_user
 from app.models.contest.submission import (
     SubmissionCreate,
@@ -17,6 +18,24 @@ from app.utils.file_upload import FileUploadService, MAX_FILES_PER_UPLOAD
 # Two routers: one for contest-specific submission endpoints, one for generic submission operations
 contest_router = APIRouter(prefix="/contests", tags=["Contest Submissions"])
 submission_router = APIRouter(prefix="/submissions", tags=["Submissions"])
+
+
+async def resolve_contest_id(identifier: str, db) -> Optional[str]:
+    """
+    Resolve contest identifier to actual contest_id.
+    Accepts both ObjectId and slug.
+    """
+    is_object_id = len(identifier) == 24 and all(c in '0123456789abcdef' for c in identifier.lower())
+    
+    if is_object_id:
+        return identifier
+    else:
+        # Look up by slug
+        contest_service = ContestService(db)
+        contest = await contest_service.get_contest_by_slug(identifier)
+        if contest:
+            return str(contest["_id"])
+        return None
 
 
 def convert_submission_to_json(submission: dict) -> dict:
@@ -39,9 +58,9 @@ def convert_submission_to_json(submission: dict) -> dict:
     return submission
 
 
-@contest_router.post("/{contest_id}/tasks/{task_id}/submit")
+@contest_router.post("/{contest_identifier}/tasks/{task_id}/submit")
 async def submit_task(
-    contest_id: str,
+    contest_identifier: str,
     task_id: str,
     content: str = Form(..., min_length=20),
     proof_url: Optional[str] = Form(None),
@@ -49,7 +68,7 @@ async def submit_task(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Submit solution/proof for a task.
+    Submit solution/proof for a task (accepts contest ID or slug).
     
     - Must be participant
     - Contest must be active
@@ -61,6 +80,13 @@ async def submit_task(
             message="Authentication required",
             status_code=401
         )
+    
+    db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
     
     # Handle file uploads
     attachments = []
@@ -84,7 +110,6 @@ async def submit_task(
                 return validation_error_response(errors={"files": str(e)})
     
     # Create submission
-    db = Database.get_db()
     submission_service = SubmissionService(db)
     
     submission_data = SubmissionCreate(
@@ -115,9 +140,9 @@ async def submit_task(
     )
 
 
-@contest_router.get("/{contest_id}/tasks/{task_id}/submissions")
+@contest_router.get("/{contest_identifier}/tasks/{task_id}/submissions")
 async def get_task_submissions(
-    contest_id: str,
+    contest_identifier: str,
     task_id: str,
     status: Optional[SubmissionStatus] = Query(None),
     page: int = Query(1, ge=1),
@@ -125,7 +150,7 @@ async def get_task_submissions(
     current_user: Optional[dict] = Depends(get_current_user)
 ):
     """
-    Get all submissions for a task.
+    Get all submissions for a task (accepts contest ID or slug).
     
     - Contest owner sees all submissions
     - Participants see only their own
@@ -133,6 +158,11 @@ async def get_task_submissions(
     """
     db = Database.get_db()
     submission_service = SubmissionService(db)
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
     
     # Get contest
     contest = await db.contests.find_one({"_id": ObjectId(contest_id)})
@@ -186,13 +216,13 @@ async def get_task_submissions(
     )
 
 
-@contest_router.get("/{contest_id}/my-submissions")
+@contest_router.get("/{contest_identifier}/my-submissions")
 async def get_my_submissions(
-    contest_id: str,
+    contest_identifier: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get all submissions by current user for a contest.
+    Get all submissions by current user for a contest (accepts contest ID or slug).
     
     - Shows all tasks user has submitted
     - Shows approval status
@@ -204,6 +234,12 @@ async def get_my_submissions(
         )
     
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     submission_service = SubmissionService(db)
     
     submissions = await submission_service.get_user_submissions(
@@ -222,16 +258,16 @@ async def get_my_submissions(
     )
 
 
-@contest_router.get("/{contest_id}/submissions")
+@contest_router.get("/{contest_identifier}/submissions")
 async def get_contest_submissions(
-    contest_id: str,
+    contest_identifier: str,
     status: Optional[SubmissionStatus] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get all submissions for a contest (owner only).
+    Get all submissions for a contest (owner only, accepts contest ID or slug).
     
     - Only contest owner can view all submissions
     - Filter by status
@@ -244,6 +280,11 @@ async def get_contest_submissions(
         )
     
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
     
     # Verify ownership
     contest = await db.contests.find_one({"_id": ObjectId(contest_id)})

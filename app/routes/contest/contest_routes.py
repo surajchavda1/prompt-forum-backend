@@ -36,6 +36,24 @@ def convert_contest_to_json(contest: dict) -> dict:
     return contest
 
 
+async def resolve_contest_id(identifier: str, db) -> Optional[str]:
+    """
+    Resolve contest identifier to actual contest_id.
+    Accepts both ObjectId and slug.
+    """
+    is_object_id = len(identifier) == 24 and all(c in '0123456789abcdef' for c in identifier.lower())
+    
+    if is_object_id:
+        return identifier
+    else:
+        # Look up by slug
+        contest_service = ContestService(db)
+        contest = await contest_service.get_contest_by_slug(identifier)
+        if contest:
+            return str(contest["_id"])
+        return None
+
+
 @router.post("/create")
 async def create_contest(
     title: str = Form(..., min_length=10, max_length=200),
@@ -524,9 +542,9 @@ async def delete_contest(
     )
 
 
-@router.post("/{contest_id}/start")
+@router.post("/{contest_identifier}/start")
 async def start_contest(
-    contest_id: str,
+    contest_identifier: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -542,6 +560,12 @@ async def start_contest(
         )
     
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     contest_service = ContestService(db)
     
     success, message = await contest_service.start_contest(
@@ -558,9 +582,9 @@ async def start_contest(
     )
 
 
-@router.post("/{contest_id}/complete")
+@router.post("/{contest_identifier}/complete")
 async def complete_contest(
-    contest_id: str,
+    contest_identifier: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -576,6 +600,12 @@ async def complete_contest(
         )
     
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     contest_service = ContestService(db)
     
     success, message = await contest_service.complete_contest(
@@ -592,13 +622,13 @@ async def complete_contest(
     )
 
 
-@router.post("/{contest_id}/join")
+@router.post("/{contest_identifier}/join")
 async def join_contest(
-    contest_id: str,
+    contest_identifier: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Join a contest as a participant.
+    Join a contest as a participant (accepts contest ID or slug).
     
     - Cannot join own contest
     - Cannot join if full
@@ -611,6 +641,12 @@ async def join_contest(
         )
     
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     contest_service = ContestService(db)
     
     success, message = await contest_service.join_contest(
@@ -628,13 +664,13 @@ async def join_contest(
     )
 
 
-@router.post("/{contest_id}/leave")
+@router.post("/{contest_identifier}/leave")
 async def leave_contest(
-    contest_id: str,
+    contest_identifier: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Leave a contest.
+    Leave a contest (accepts contest ID or slug).
     
     - Only before contest starts
     - Cannot leave if has submissions
@@ -646,6 +682,12 @@ async def leave_contest(
         )
     
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     contest_service = ContestService(db)
     
     success, message = await contest_service.leave_contest(
@@ -662,14 +704,14 @@ async def leave_contest(
     )
 
 
-@router.post("/{contest_id}/vote")
+@router.post("/{contest_identifier}/vote")
 async def vote_on_contest(
-    contest_id: str,
+    contest_identifier: str,
     vote_type: str = Form(..., regex="^(upvote|downvote|remove)$"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Vote on a contest.
+    Vote on a contest (accepts contest ID or slug).
     
     - upvote: Like the contest
     - downvote: Dislike the contest
@@ -683,6 +725,12 @@ async def vote_on_contest(
         )
     
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     contest_service = ContestService(db)
     
     success, message, net_votes = await contest_service.vote_contest(
@@ -700,14 +748,19 @@ async def vote_on_contest(
     )
 
 
-@router.get("/{contest_id}/participants")
+@router.get("/{contest_identifier}/participants")
 async def get_contest_participants(
-    contest_id: str,
+    contest_identifier: str,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100)
 ):
-    """Get all participants of a contest"""
+    """Get all participants of a contest (accepts contest ID or slug)"""
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
     
     skip = (page - 1) * limit
     
@@ -778,18 +831,23 @@ async def get_contest_participants(
     )
 
 
-@router.get("/{contest_id}/leaderboard")
+@router.get("/{contest_identifier}/leaderboard")
 async def get_contest_leaderboard(
-    contest_id: str,
+    contest_identifier: str,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100)
 ):
     """
-    Get contest leaderboard sorted by total score.
+    Get contest leaderboard sorted by total score (accepts contest ID or slug).
     
     - Shows participants ranked by approved task points
     """
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
     
     skip = (page - 1) * limit
     
@@ -862,13 +920,13 @@ async def get_contest_leaderboard(
 # CONTEST SIDEBAR WIDGETS - For Contest Details Page
 # ============================================================================
 
-@router.get("/{contest_id}/widgets/my-progress")
+@router.get("/{contest_identifier}/widgets/my-progress")
 async def get_my_contest_progress(
-    contest_id: str,
+    contest_identifier: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get current user's progress in this contest.
+    Get current user's progress in this contest (accepts contest ID or slug).
     
     Returns:
     - Rank in contest
@@ -885,6 +943,12 @@ async def get_my_contest_progress(
         )
     
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     widgets_service = ContestWidgetsService(db)
     
     progress = await widgets_service.get_user_progress(
@@ -904,10 +968,10 @@ async def get_my_contest_progress(
     )
 
 
-@router.get("/{contest_id}/widgets/stats")
-async def get_contest_stats_widget(contest_id: str):
+@router.get("/{contest_identifier}/widgets/stats")
+async def get_contest_stats_widget(contest_identifier: str):
     """
-    Get enhanced contest statistics for sidebar widget.
+    Get enhanced contest statistics for sidebar widget (accepts contest ID or slug).
     
     Returns:
     - Total participants
@@ -921,6 +985,12 @@ async def get_contest_stats_widget(contest_id: str):
     Widget: "Contest Stats"
     """
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     widgets_service = ContestWidgetsService(db)
     
     stats = await widgets_service.get_contest_stats(contest_id)
@@ -931,10 +1001,10 @@ async def get_contest_stats_widget(contest_id: str):
     )
 
 
-@router.get("/{contest_id}/widgets/owner-info")
-async def get_contest_owner_widget(contest_id: str):
+@router.get("/{contest_identifier}/widgets/owner-info")
+async def get_contest_owner_widget(contest_identifier: str):
     """
-    Get contest owner information and their other contests.
+    Get contest owner information and their other contests (accepts contest ID or slug).
     
     Returns:
     - Owner profile
@@ -945,6 +1015,11 @@ async def get_contest_owner_widget(contest_id: str):
     Widget: "Organized By"
     """
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
     
     # Get contest to find owner
     contest = await db.contests.find_one({"_id": ObjectId(contest_id)})
@@ -980,13 +1055,13 @@ async def get_contest_owner_widget(contest_id: str):
     )
 
 
-@router.get("/{contest_id}/widgets/similar-contests")
+@router.get("/{contest_identifier}/widgets/similar-contests")
 async def get_similar_contests_widget(
-    contest_id: str,
+    contest_identifier: str,
     limit: int = Query(5, ge=1, le=10)
 ):
     """
-    Get similar/related contests for sidebar.
+    Get similar/related contests for sidebar (accepts contest ID or slug).
     
     Returns contests that are:
     - Same category or difficulty
@@ -996,6 +1071,12 @@ async def get_similar_contests_widget(
     Widget: "Similar Contests"
     """
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     widgets_service = ContestWidgetsService(db)
     
     similar = await widgets_service.get_similar_contests(
@@ -1012,13 +1093,13 @@ async def get_similar_contests_widget(
     )
 
 
-@router.get("/{contest_id}/widgets/recent-activity")
+@router.get("/{contest_identifier}/widgets/recent-activity")
 async def get_contest_activity_widget(
-    contest_id: str,
+    contest_identifier: str,
     limit: int = Query(10, ge=5, le=20)
 ):
     """
-    Get recent activity feed for the contest.
+    Get recent activity feed for the contest (accepts contest ID or slug).
     
     Includes:
     - New submissions
@@ -1029,6 +1110,12 @@ async def get_contest_activity_widget(
     Widget: "Recent Activity"
     """
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     widgets_service = ContestWidgetsService(db)
     
     activities = await widgets_service.get_recent_activity(
@@ -1045,14 +1132,14 @@ async def get_contest_activity_widget(
     )
 
 
-@router.get("/{contest_id}/widgets/top-performers")
+@router.get("/{contest_identifier}/widgets/top-performers")
 async def get_top_performers_widget(
-    contest_id: str,
+    contest_identifier: str,
     time_period: str = Query("week", regex="^(day|week|month|all_time)$"),
     limit: int = Query(5, ge=3, le=10)
 ):
     """
-    Get top performers in the contest for a time period.
+    Get top performers in the contest for a time period (accepts contest ID or slug).
     
     time_period: "day", "week", "month", "all_time"
     
@@ -1065,6 +1152,12 @@ async def get_top_performers_widget(
     Widget: "Top Performers This Week/Day"
     """
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     widgets_service = ContestWidgetsService(db)
     
     performers = await widgets_service.get_top_performers(
@@ -1083,10 +1176,10 @@ async def get_top_performers_widget(
     )
 
 
-@router.get("/{contest_id}/widgets/task-stats")
-async def get_task_completion_widget(contest_id: str):
+@router.get("/{contest_identifier}/widgets/task-stats")
+async def get_task_completion_widget(contest_identifier: str):
     """
-    Get task completion statistics for progress bars.
+    Get task completion statistics for progress bars (accepts contest ID or slug).
     
     Returns for each task:
     - Task title
@@ -1098,6 +1191,12 @@ async def get_task_completion_widget(contest_id: str):
     Widget: "Task Completion Stats"
     """
     db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
     widgets_service = ContestWidgetsService(db)
     
     task_stats = await widgets_service.get_task_completion_stats(contest_id)
