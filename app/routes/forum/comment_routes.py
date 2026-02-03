@@ -436,6 +436,13 @@ async def accept_comment_as_solution(
             status_code=403
         )
     
+    # SECURITY: Prevent users from accepting their own answers
+    if comment["author_id"] == str(current_user["_id"]):
+        return error_response(
+            message="You cannot accept your own answer as the solution",
+            status_code=403
+        )
+    
     # Check if post is already solved (final decision - cannot be undone)
     if post.get("is_solved", False):
         return error_response(
