@@ -546,7 +546,19 @@ class PostService:
         return result.modified_count > 0
     
     async def mark_solved(self, post_id: str) -> bool:
-        """Mark post as solved"""
+        """
+        Mark post as solved.
+        Once marked as solved, it cannot be undone (final decision).
+        """
+        # Check if post is already solved
+        post = await self.get_post_by_id(post_id)
+        if not post:
+            return False
+        
+        # If already solved, cannot be changed (final decision)
+        if post.get("is_solved", False):
+            return False
+        
         result = await self.collection.update_one(
             {"_id": ObjectId(post_id)},
             {"$set": {"is_solved": True, "updated_at": datetime.utcnow()}}

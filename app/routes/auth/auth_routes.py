@@ -63,13 +63,23 @@ async def verify_email(
     """
     try:
         auth_service = AuthService(db)
+        
+        # Check if user exists first
+        user = await auth_service.get_user_by_email(verify_data.email)
+        if not user:
+            return error_response(message="User not found")
+        
+        # Verify OTP
         is_verified = await auth_service.verify_email(verify_data.email, verify_data.otp_code)
         
         if not is_verified:
             return error_response(message="Invalid or expired OTP code")
         
-        # Get user and generate tokens
+        # Get updated user and generate tokens
         user = await auth_service.get_user_by_email(verify_data.email)
+        if not user:
+            return error_response(message="User not found")
+        
         access_token = security_service.create_access_token(
             data={"sub": user["email"], "user_id": str(user["_id"])}
         )
@@ -85,7 +95,19 @@ async def verify_email(
                 "token_type": "bearer"
             }
         )
+    except ValueError as e:
+        # SECRET_KEY related errors
+        if "SECRET_KEY" in str(e):
+            print(f"❌ Configuration error: {str(e)}")
+            return error_response(
+                message="Server configuration error. Please contact administrator."
+            )
+        return error_response(message=str(e))
     except Exception as e:
+        # Log the actual error for debugging
+        print(f"❌ Verification error: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return error_response(message="Verification failed")
 
 

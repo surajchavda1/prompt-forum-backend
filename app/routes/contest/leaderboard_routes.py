@@ -10,7 +10,7 @@ router = APIRouter(prefix="/leaderboard", tags=["Leaderboard"])
 @router.get("")
 async def get_global_leaderboard(
     limit: int = Query(10, ge=1, le=100, description="Number of top users to return"),
-    time_period: str = Query("all_time", regex="^(all_time|this_month|this_week|today)$")
+    time_period: str = Query("all_time", pattern="^(all_time|this_month|this_week|today)$")
 ):
     """
     Get global leaderboard with real reputation rankings.

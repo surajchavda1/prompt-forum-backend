@@ -22,6 +22,16 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
+# Validate SECRET_KEY (warn but don't fail at import time)
+if not SECRET_KEY or SECRET_KEY == "your-super-secret-key-here-change-this-in-production":
+    import warnings
+    warnings.warn(
+        "SECRET_KEY is not set or is using the default value. "
+        "Please set a secure SECRET_KEY in your .env file. "
+        "You can generate one using: openssl rand -hex 32",
+        UserWarning
+    )
+
 
 class SecurityService:
     """Service for security operations like password hashing and JWT tokens"""
@@ -51,6 +61,9 @@ class SecurityService:
     @staticmethod
     def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """Create JWT access token"""
+        if not SECRET_KEY:
+            raise ValueError("SECRET_KEY is not configured. Please set it in your .env file.")
+        
         to_encode = data.copy()
         
         if expires_delta:
@@ -65,6 +78,9 @@ class SecurityService:
     @staticmethod
     def create_refresh_token(data: dict) -> str:
         """Create JWT refresh token"""
+        if not SECRET_KEY:
+            raise ValueError("SECRET_KEY is not configured. Please set it in your .env file.")
+        
         to_encode = data.copy()
         expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
         to_encode.update({"exp": expire, "type": "refresh"})
@@ -74,6 +90,9 @@ class SecurityService:
     @staticmethod
     def verify_token(token: str, token_type: str = "access") -> Optional[TokenData]:
         """Verify and decode JWT token"""
+        if not SECRET_KEY:
+            raise ValueError("SECRET_KEY is not configured. Please set it in your .env file.")
+        
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             

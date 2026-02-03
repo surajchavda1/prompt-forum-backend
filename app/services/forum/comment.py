@@ -356,8 +356,10 @@ class CommentService:
     
     async def accept_comment(self, comment_id: str, post_id: str) -> bool:
         """
-        Mark a comment as accepted solution
-        Only one comment can be accepted per post
+        Mark a comment as accepted solution.
+        Only one comment can be accepted per post.
+        Note: Caller should check if post is already solved before calling this method.
+        Once a post is marked as solved, it cannot be unmarked (final decision).
         """
         # First, unaccept any previously accepted comments for this post
         await self.collection.update_many(

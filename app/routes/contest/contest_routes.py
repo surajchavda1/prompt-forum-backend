@@ -256,7 +256,7 @@ async def get_my_contests(
 async def get_joined_contests(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    status: str = Query(None, regex="^(active|completed|all)$"),
+    status: str = Query(None, pattern="^(active|completed|all)$"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -707,7 +707,7 @@ async def leave_contest(
 @router.post("/{contest_identifier}/vote")
 async def vote_on_contest(
     contest_identifier: str,
-    vote_type: str = Form(..., regex="^(upvote|downvote|remove)$"),
+    vote_type: str = Form(..., pattern="^(upvote|downvote|remove)$"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -1135,7 +1135,7 @@ async def get_contest_activity_widget(
 @router.get("/{contest_identifier}/widgets/top-performers")
 async def get_top_performers_widget(
     contest_identifier: str,
-    time_period: str = Query("week", regex="^(day|week|month|all_time)$"),
+    time_period: str = Query("week", pattern="^(day|week|month|all_time)$"),
     limit: int = Query(5, ge=3, le=10)
 ):
     """

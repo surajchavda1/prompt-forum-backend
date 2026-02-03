@@ -258,7 +258,7 @@ async def get_user_questions_by_username(
     username: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    sort_by: str = Query("created_at", regex="^(created_at|upvote_count|view_count)$")
+    sort_by: str = Query("created_at", pattern="^(created_at|upvote_count|view_count)$")
 ):
     """
     Get all questions posted by a user (by username).
@@ -307,7 +307,7 @@ async def get_user_questions(
     user_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    sort_by: str = Query("created_at", regex="^(created_at|upvote_count|view_count)$")
+    sort_by: str = Query("created_at", pattern="^(created_at|upvote_count|view_count)$")
 ):
     """
     Get all questions posted by a user (by user ID).
@@ -346,7 +346,7 @@ async def get_user_answers_by_username(
     username: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    sort_by: str = Query("created_at", regex="^(created_at|upvote_count)$")
+    sort_by: str = Query("created_at", pattern="^(created_at|upvote_count)$")
 ):
     """
     Get all answers posted by a user (by username).
@@ -395,7 +395,7 @@ async def get_user_answers(
     user_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    sort_by: str = Query("created_at", regex="^(created_at|upvote_count)$")
+    sort_by: str = Query("created_at", pattern="^(created_at|upvote_count)$")
 ):
     """
     Get all answers posted by a user (by user ID).

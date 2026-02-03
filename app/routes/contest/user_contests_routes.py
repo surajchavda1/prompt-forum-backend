@@ -148,7 +148,7 @@ async def get_user_participated_contests(
     user_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    status: str = Query(None, regex="^(active|completed|all)$")
+    status: str = Query(None, pattern="^(active|completed|all)$")
 ):
     """
     Get all contests a user has participated in.
@@ -284,7 +284,7 @@ async def get_user_organized_contests(
     user_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    status: str = Query(None, regex="^(draft|active|completed|all)$")
+    status: str = Query(None, pattern="^(draft|active|completed|all)$")
 ):
     """
     Get all contests organized/created by a user.

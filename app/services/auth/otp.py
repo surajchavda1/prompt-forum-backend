@@ -43,9 +43,9 @@ class OTPService:
     
     async def verify_otp(self, email: str, otp_code: str) -> bool:
         """Verify OTP code for an email"""
+        # First, find any unused OTP for this email
         otp = await self.collection.find_one({
             "email": email,
-            "otp_code": otp_code,
             "is_used": False
         })
         
@@ -58,6 +58,15 @@ class OTPService:
         
         # Check max attempts
         if otp["attempts"] >= 5:
+            return False
+        
+        # Check if OTP code matches
+        if otp["otp_code"] != otp_code:
+            # Increment attempts for wrong code
+            await self.collection.update_one(
+                {"_id": otp["_id"]},
+                {"$inc": {"attempts": 1}}
+            )
             return False
         
         # Mark as used

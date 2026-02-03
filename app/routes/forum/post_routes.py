@@ -729,16 +729,23 @@ async def mark_post_solved(
             status_code=403
         )
     
+    # Check if post is already solved (final decision - cannot be undone)
+    if post.get("is_solved", False):
+        return error_response(
+            message="This question is already marked as completed. Once marked as completed, it cannot be changed.",
+            status_code=400
+        )
+    
     success = await post_service.mark_solved(post_id)
     
     if success:
         return success_response(
-            message="Post marked as solved",
+            message="Post marked as solved. This is a final decision and cannot be undone.",
             data={"post_id": post_id}
         )
     else:
         return error_response(
-            message="Failed to mark post as solved"
+            message="Failed to mark post as solved. The post may already be marked as completed."
         )
 
 

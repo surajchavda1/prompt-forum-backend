@@ -436,14 +436,23 @@ async def accept_comment_as_solution(
             status_code=403
         )
     
+    # Check if post is already solved (final decision - cannot be undone)
+    if post.get("is_solved", False):
+        return error_response(
+            message="This question is already marked as completed. Once marked as completed, it cannot be changed.",
+            status_code=400
+        )
+    
     # Accept the comment
     success = await comment_service.accept_comment(comment_id, comment["post_id"])
     
     if not success:
-        return error_response(message="Failed to accept comment")
+        return error_response(message="Failed to accept comment. The question may already be marked as completed.")
     
-    # Mark post as solved
-    await post_service.mark_solved(comment["post_id"])
+    # Mark post as solved (final decision - cannot be undone)
+    solved_success = await post_service.mark_solved(comment["post_id"])
+    if not solved_success:
+        return error_response(message="Failed to mark post as solved")
     
     return success_response(
         message="Comment accepted as solution",
@@ -457,51 +466,12 @@ async def unaccept_comment_solution(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Remove accepted solution status from a comment.
-    Only the post author can unaccept solutions.
+    REMOVED: Cannot unaccept solutions once a question is marked as completed.
+    Once marked as completed, it is a final decision and cannot be undone.
     """
-    if not current_user:
-        return error_response(
-            message="Authentication required",
-            status_code=401
-        )
-    
-    db = Database.get_db()
-    comment_service = CommentService(db)
-    post_service = PostService(db)
-    
-    # Get comment
-    comment = await comment_service.get_comment_by_id(comment_id)
-    if not comment:
-        return error_response(
-            message="Comment not found",
-            status_code=404
-        )
-    
-    # Get post to check ownership
-    post = await post_service.get_post_by_id(comment["post_id"])
-    if not post:
-        return error_response(
-            message="Post not found",
-            status_code=404
-        )
-    
-    # Check if current user is the post author
-    if post["author_id"] != str(current_user["_id"]):
-        return error_response(
-            message="Only the post author can unaccept solutions",
-            status_code=403
-        )
-    
-    # Unaccept the comment
-    success = await comment_service.unaccept_comment(comment_id)
-    
-    if not success:
-        return error_response(message="Failed to unaccept comment")
-    
-    return success_response(
-        message="Comment unaccepted",
-        data={"comment_id": comment_id}
+    return error_response(
+        message="Unaccepting solutions is not allowed. Once a question is marked as completed, it is a final decision and cannot be changed.",
+        status_code=403
     )
 
 
