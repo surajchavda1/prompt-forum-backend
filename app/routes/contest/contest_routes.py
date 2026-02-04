@@ -20,16 +20,33 @@ router = APIRouter(prefix="/contests", tags=["Contests"])
 
 
 def convert_contest_to_json(contest: dict) -> dict:
-    """Convert contest document to JSON"""
+    """Convert contest document to JSON-serializable format"""
+    from datetime import datetime as dt, timedelta
+    from bson import ObjectId
+    
+    def serialize_value(value):
+        """Recursively serialize non-JSON-serializable values"""
+        if isinstance(value, dt):
+            return value.isoformat()
+        elif isinstance(value, timedelta):
+            return str(value)
+        elif isinstance(value, ObjectId):
+            return str(value)
+        elif isinstance(value, dict):
+            return {k: serialize_value(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [serialize_value(item) for item in value]
+        return value
+    
+    # Convert _id to id string
     contest["id"] = str(contest["_id"])
     del contest["_id"]
     
-    # Convert dates
-    for field in ["start_date", "end_date", "created_at", "updated_at"]:
-        if contest.get(field):
-            contest[field] = contest[field].isoformat()
+    # Serialize all values recursively (handles datetime, timedelta, ObjectId, nested dicts)
+    for key, value in list(contest.items()):
+        contest[key] = serialize_value(value)
     
-    # Remove voter arrays
+    # Remove voter arrays (security - don't expose who voted)
     contest.pop("upvoters", None)
     contest.pop("downvoters", None)
     
@@ -60,7 +77,6 @@ async def create_contest(
     description: str = Form(..., min_length=50),
     category: str = Form(...),
     difficulty: ContestDifficulty = Form(...),
-    contest_type: ContestType = Form(ContestType.INDIVIDUAL),
     total_prize: float = Form(..., gt=0),
     max_participants: int = Form(..., gt=0),
     start_date: str = Form(...),
@@ -72,10 +88,20 @@ async def create_contest(
     """
     Create a new contest (any authenticated user can create).
     
+    NOTE: Contest type is always INDIVIDUAL (team contests not supported yet).
+    
+    CREDIT REQUIREMENTS:
+    - User must have enough credits: prize_pool + platform_fee
+    - Platform fee is calculated dynamically from database config
+    - Prize pool credits are locked (held until contest ends)
+    - Platform fee is deducted immediately
+    
     - Contest starts in DRAFT status
     - Owner can add tasks before starting
     - Must have at least 1 task to start
     """
+    from app.services.contest.contest_fee import ContestFeeService
+    
     if not current_user:
         return error_response(
             message="Authentication required",
@@ -97,19 +123,38 @@ async def create_contest(
             errors={"end_date": "End date must be after start date"}
         )
     
+    db = Database.get_db()
+    user_id = str(current_user["_id"])
+    
+    # ==========================================
+    # CREDIT VALIDATION (Dynamic from DB)
+    # ==========================================
+    contest_fee_service = ContestFeeService(db)
+    
+    # Validate contest creation requirements (balance, limits, etc.)
+    validation = await contest_fee_service.validate_contest_creation(
+        user_id=user_id,
+        prize_pool=total_prize,
+        max_participants=max_participants
+    )
+    
+    if not validation.can_create:
+        return error_response(
+            message=validation.reason,
+            status_code=400
+        )
+    
     # Handle cover image
     cover_image_url = None
     if cover_image and cover_image.filename:
         try:
             file_service = FileUploadService()
-            user_id = str(current_user["_id"])
             file_info = await file_service.save_file(cover_image, user_id)
             cover_image_url = file_info["file_url"]
         except ValueError as e:
             return validation_error_response(errors={"cover_image": str(e)})
     
-    # Create contest
-    db = Database.get_db()
+    # Create contest data
     contest_service = ContestService(db)
     
     contest_data = ContestCreate(
@@ -117,7 +162,7 @@ async def create_contest(
         description=description,
         category=category,
         difficulty=difficulty,
-        contest_type=contest_type,
+        contest_type=ContestType.INDIVIDUAL,  # Always individual (team not supported yet)
         total_prize=total_prize,
         max_participants=max_participants,
         start_date=start_dt,
@@ -125,9 +170,10 @@ async def create_contest(
         rules=rules
     )
     
+    # First create the contest (we need the ID for payment reference)
     contest = await contest_service.create_contest(
         contest_data=contest_data,
-        owner_id=str(current_user["_id"]),
+        owner_id=user_id,
         owner_name=current_user.get("full_name") or current_user.get("email"),
         cover_image=cover_image_url
     )
@@ -135,10 +181,132 @@ async def create_contest(
     if not contest:
         return error_response(message="Failed to create contest")
     
+    contest_id = str(contest["_id"])
+    
+    # ==========================================
+    # PROCESS CREDIT PAYMENT
+    # Lock prize pool + Deduct platform fee
+    # ==========================================
+    payment_success, payment_message, payment_details = await contest_fee_service.process_contest_creation_payment(
+        user_id=user_id,
+        contest_id=contest_id,
+        contest_title=title,
+        prize_pool=total_prize
+    )
+    
+    if not payment_success:
+        # Rollback: Delete the contest if payment fails
+        await contest_service.contests.delete_one({"_id": contest["_id"]})
+        return error_response(
+            message=f"Contest creation failed: {payment_message}",
+            status_code=400
+        )
+    
+    # Update contest with payment info
+    fee_info = validation.fee_breakdown
+    await contest_service.contests.update_one(
+        {"_id": contest["_id"]},
+        {"$set": {
+            "prize_pool_locked": True,
+            "platform_fee": fee_info.platform_fee_total if fee_info else 0,
+            "total_charged": fee_info.total_required if fee_info else total_prize,
+            "payment_details": payment_details,
+            "credits_locked_at": datetime.utcnow()
+        }}
+    )
+    
+    # Add payment info to response
+    contest["prize_pool_locked"] = True
+    contest["platform_fee"] = fee_info.platform_fee_total if fee_info else 0
+    contest["total_charged"] = fee_info.total_required if fee_info else total_prize
+    
     return success_response(
-        message="Contest created successfully",
-        data={"contest": convert_contest_to_json(contest)},
+        message="Contest created successfully. Prize pool locked and platform fee charged.",
+        data={
+            "contest": convert_contest_to_json(contest),
+            "payment": {
+                "prize_pool": total_prize,
+                "platform_fee": fee_info.platform_fee_total if fee_info else 0,
+                "total_charged": fee_info.total_required if fee_info else total_prize,
+                "credits_locked": True
+            }
+        },
         status_code=201
+    )
+
+
+# ==========================================
+# CONTEST FEE ENDPOINTS (Dynamic from DB)
+# ==========================================
+
+@router.get("/fees/config")
+async def get_contest_fee_config():
+    """
+    Get contest creation fee configuration.
+    
+    All settings are dynamic from database - no hardcoded values.
+    Use this to display fee information to users before contest creation.
+    """
+    from app.services.contest.contest_fee import ContestFeeService
+    
+    db = Database.get_db()
+    fee_service = ContestFeeService(db)
+    config = await fee_service.get_config()
+    
+    return success_response(
+        message="Fee configuration retrieved",
+        data={"config": config}
+    )
+
+
+@router.get("/fees/calculate")
+async def calculate_contest_fees(
+    prize_pool: float = Query(..., gt=0, description="Prize pool amount in credits"),
+    max_participants: int = Query(..., gt=0, description="Maximum participants"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Calculate fees for creating a contest (preview before actual creation).
+    
+    Returns:
+    - Platform fee breakdown
+    - Total credits required
+    - Whether user can create this contest
+    """
+    from app.services.contest.contest_fee import ContestFeeService
+    
+    if not current_user:
+        return error_response(message="Authentication required", status_code=401)
+    
+    db = Database.get_db()
+    fee_service = ContestFeeService(db)
+    user_id = str(current_user["_id"])
+    
+    # Validate and calculate
+    validation = await fee_service.validate_contest_creation(
+        user_id=user_id,
+        prize_pool=prize_pool,
+        max_participants=max_participants
+    )
+    
+    fee_calc = await fee_service.calculate_creation_fee(prize_pool)
+    
+    return success_response(
+        message="Fee calculation complete",
+        data={
+            "can_create": validation.can_create,
+            "reason": validation.reason,
+            "fee_breakdown": {
+                "prize_pool": fee_calc.prize_pool,
+                "platform_fee_percentage": fee_calc.platform_fee_percentage,
+                "platform_fee_fixed": fee_calc.platform_fee_fixed,
+                "platform_fee_total": fee_calc.platform_fee_total,
+                "total_required": fee_calc.total_required,
+                "currency": fee_calc.currency
+            },
+            "user_balance": validation.user_balance,
+            "active_contests": validation.active_contests
+        }
     )
 
 

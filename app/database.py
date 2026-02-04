@@ -87,6 +87,13 @@ class Database:
             print("[OK] Created indexes on withdrawal_methods")
         except Exception as e:
             print(f"[WARN] Indexes on withdrawal_methods may already exist: {e}")
+        
+        # Contest configuration indexes (dynamic contest fees)
+        try:
+            await db.contest_config.create_index([("config_id", ASCENDING)], unique=True)
+            print("[OK] Created index on contest_config")
+        except Exception as e:
+            print(f"[WARN] Index on contest_config may already exist: {e}")
     
     @classmethod
     async def close_db(cls):

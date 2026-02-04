@@ -94,11 +94,26 @@ async def create_post(
     
     # Process tags
     tag_list = []
+    invalid_tags = []
     if tags.strip():
         tag_names = [t.strip().lower() for t in tags.split(',') if t.strip()]
         tag_names = list(set(tag_names))[:10]  # Max 10 unique tags
         
         for tag_name in tag_names:
+            # Validate tag length (2-30 characters)
+            if len(tag_name) < 2:
+                invalid_tags.append(f"'{tag_name}' is too short (min 2 chars)")
+                continue
+            if len(tag_name) > 30:
+                invalid_tags.append(f"'{tag_name[:20]}...' is too long (max 30 chars)")
+                continue
+            
+            # Validate tag format (alphanumeric, hyphens, spaces only)
+            import re
+            if not re.match(r'^[a-z0-9][a-z0-9\s\-]*[a-z0-9]$|^[a-z0-9]$', tag_name):
+                invalid_tags.append(f"'{tag_name[:20]}' has invalid characters")
+                continue
+            
             # Check if tag exists
             existing_tag = await tag_service.get_tag_by_slug(tag_name)
             if existing_tag:
@@ -581,8 +596,21 @@ async def update_post(
     if body:
         update_data["body"] = body
     if tags is not None:
-        tag_list = [t.strip().lower() for t in tags.split(',') if t.strip()]
-        update_data["tags"] = list(set(tag_list))[:10]
+        import re
+        tag_names = [t.strip().lower() for t in tags.split(',') if t.strip()]
+        tag_names = list(set(tag_names))[:10]  # Max 10 unique tags
+        
+        # Validate each tag
+        valid_tags = []
+        for tag_name in tag_names:
+            # Skip invalid tags (too short, too long, or invalid characters)
+            if len(tag_name) < 2 or len(tag_name) > 30:
+                continue
+            if not re.match(r'^[a-z0-9][a-z0-9\s\-]*[a-z0-9]$|^[a-z0-9]$', tag_name):
+                continue
+            valid_tags.append(tag_name)
+        
+        update_data["tags"] = valid_tags
     
     if not update_data:
         return validation_error_response(

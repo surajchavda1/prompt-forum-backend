@@ -1,9 +1,9 @@
 {
   "info": {
     "name": "PromptForum Payment & Wallet API",
-    "description": "Complete API collection for Payment Gateway, Wallet System, and Withdrawals.\n\n## Quick Start\n1. Set test_email and test_password in collection variables\n2. Run 'Login (Get Token)' - token saves automatically\n3. Test wallet, payment, and withdrawal endpoints\n\n## Authentication\n- All endpoints (except login) require Bearer token\n- Token is automatically included from collection auth\n- Login expects JSON body: {\"email\": \"...\", \"password\": \"...\"}\n\n## Features\n- Wallet operations (balance, transactions, stats)\n- Credit packages and payment orders (Cashfree)\n- Worldwide withdrawals (Bank, PayPal, Wise, Crypto, UPI)\n- Admin approval workflow for withdrawals\n\n## Withdrawal Methods\n- Bank Transfer: SWIFT, IBAN, ACH (US), SEPA (EU), NEFT (India)\n- Digital Wallets: PayPal, Wise, Payoneer\n- Crypto: USDT, USDC, BTC, ETH (multiple networks)\n- Regional: UPI (India), Alipay, WeChat Pay",
+    "description": "Complete API collection for Payment Gateway, Wallet System, Withdrawals, and Contest Fees.\n\n## Quick Start\n1. Set test_email and test_password in collection variables\n2. Run 'Login (Get Token)' - token saves automatically\n3. Test wallet, payment, withdrawal, and contest fee endpoints\n\n## Authentication\n- All endpoints (except login) require Bearer token\n- Token is automatically included from collection auth\n- Login expects JSON body: {\"email\": \"...\", \"password\": \"...\"}\n\n## Features\n- Wallet operations (balance, transactions, stats)\n- Credit packages and payment orders (Cashfree)\n- Worldwide withdrawals (Bank, PayPal, Wise, Crypto, UPI)\n- Contest creation with credit system (dynamic fees)\n- Admin approval workflow for withdrawals\n\n## Contest Creation\n- User must have credits: prize_pool + platform_fee\n- Prize pool is LOCKED when creating contest\n- Platform fee is DEDUCTED immediately\n- All settings are dynamic from database\n\n## Withdrawal Methods\n- Bank Transfer: SWIFT, IBAN, ACH (US), SEPA (EU), NEFT (India)\n- Digital Wallets: PayPal, Wise, Payoneer\n- Crypto: USDT, USDC, BTC, ETH (multiple networks)\n- Regional: UPI (India), Alipay, WeChat Pay",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "version": "1.2.0"
+    "version": "1.3.0"
   },
   "variable": [
     {
@@ -48,6 +48,11 @@
     },
     {
       "key": "withdrawal_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "contest_id",
       "value": "",
       "type": "string"
     }
@@ -1559,6 +1564,95 @@
               "path": ["api", "withdrawals", "{{withdrawal_id}}", "cancel"]
             },
             "description": "Cancel a pending withdrawal. Only PENDING status can be cancelled."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Contest Fees (Dynamic)",
+      "description": "## Contest Creation Fee System\n\nAll settings from database - no hardcoded values!\n\n### How It Works:\n1. User must have credits: prize_pool + platform_fee\n2. Platform fee is calculated dynamically (% or fixed from DB)\n3. Prize pool is LOCKED (not spent) when creating\n4. Platform fee is DEDUCTED immediately\n\n### Configuration (from DB):\n- Global settings: `contest_config` collection\n\n### Initialize Config:\n```bash\npython seed_contest_config.py\n```\n\n### Fee Calculation:\n- Type: fixed, percentage, or mixed\n- Min/Max caps applied\n- Example: 5% fee with 10 min, 1000 max\n  - Prize 100 → Fee 10 (min applies)\n  - Prize 5000 → Fee 250\n  - Prize 50000 → Fee 1000 (max applies)\n\n### Flow:\n1. GET /fees/config - Get fee settings\n2. GET /fees/calculate - Preview fees for your contest\n3. POST /contests/create - Create contest (auto-charges)",
+      "item": [
+        {
+          "name": "Get Fee Config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/contests/fees/config",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contests", "fees", "config"]
+            },
+            "description": "Get contest fee configuration from database.\n\nReturns:\n- Fee type (fixed/percentage/mixed)\n- Fee percentages and fixed amounts\n- Min/max caps\n- Prize pool limits\n- Active contest limits\n- Refund policy"
+          },
+          "response": []
+        },
+        {
+          "name": "Calculate Contest Fees",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/contests/fees/calculate?prize_pool=1000&max_participants=100",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contests", "fees", "calculate"],
+              "query": [
+                {"key": "prize_pool", "value": "1000", "description": "Prize pool amount in credits"},
+                {"key": "max_participants", "value": "100", "description": "Maximum participants"}
+              ]
+            },
+            "description": "Preview fees before creating a contest.\n\nReturns:\n- Platform fee breakdown\n- Total credits required\n- Whether you can create this contest\n- Your current balance\n- Active contests count"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Contest (With Credits)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.contest) {",
+                  "        pm.collectionVariables.set('contest_id', jsonData.data.contest.id);",
+                  "        console.log('Contest created: ' + jsonData.data.contest.id);",
+                  "    }",
+                  "    if (jsonData.data && jsonData.data.payment) {",
+                  "        console.log('Payment details:');",
+                  "        console.log('  Prize Pool: ' + jsonData.data.payment.prize_pool);",
+                  "        console.log('  Platform Fee: ' + jsonData.data.payment.platform_fee);",
+                  "        console.log('  Total Charged: ' + jsonData.data.payment.total_charged);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {"key": "title", "value": "AI Image Generation Challenge", "description": "Contest title (10-200 chars)", "type": "text"},
+                {"key": "description", "value": "Create the most creative AI-generated images using prompt engineering. Show your skills in crafting detailed prompts that generate stunning visuals. Winners will be selected based on creativity, technical skill, and adherence to theme.", "description": "Description (min 50 chars)", "type": "text"},
+                {"key": "category", "value": "AI Art", "description": "Contest category", "type": "text"},
+                {"key": "difficulty", "value": "intermediate", "description": "beginner/intermediate/advanced", "type": "text"},
+                {"key": "total_prize", "value": "1000", "description": "Prize pool in credits (will be locked)", "type": "text"},
+                {"key": "max_participants", "value": "100", "description": "Max participants", "type": "text"},
+                {"key": "start_date", "value": "2026-02-10T00:00:00Z", "description": "ISO format", "type": "text"},
+                {"key": "end_date", "value": "2026-02-20T23:59:59Z", "description": "ISO format", "type": "text"},
+                {"key": "rules", "value": "1. Original work only\n2. AI tools allowed\n3. No offensive content", "description": "Optional rules", "type": "text"}
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/contests/create",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contests", "create"]
+            },
+            "description": "Create a new contest.\n\n**CREDIT REQUIREMENTS:**\n- User must have: prize_pool + platform_fee\n- Prize pool is LOCKED (not spent)\n- Platform fee is DEDUCTED immediately\n\n**Example (5% fee, 10 min):**\n- Prize: 1000 credits\n- Fee: 50 credits (5%)\n- Total needed: 1050 credits\n\n**On Success:**\n- 1000 credits locked as prize pool\n- 50 credits deducted as platform fee\n- Contest created in DRAFT status"
           },
           "response": []
         }

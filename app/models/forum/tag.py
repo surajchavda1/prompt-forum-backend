@@ -5,8 +5,8 @@ from datetime import datetime
 
 class TagBase(BaseModel):
     """Base tag schema"""
-    name: str = Field(..., min_length=1, max_length=50)
-    slug: str = Field(..., min_length=1, max_length=50)
+    name: str = Field(..., min_length=2, max_length=30)
+    slug: str = Field(..., min_length=2, max_length=30)
     description: Optional[str] = Field(None, max_length=200)
     group: Optional[str] = Field(None, max_length=50)
     color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
@@ -19,7 +19,7 @@ class TagCreate(TagBase):
 
 class TagUpdate(BaseModel):
     """Schema for tag update"""
-    name: Optional[str] = Field(None, min_length=1, max_length=50)
+    name: Optional[str] = Field(None, min_length=2, max_length=30)
     description: Optional[str] = Field(None, max_length=200)
     group: Optional[str] = Field(None, max_length=50)
     color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
