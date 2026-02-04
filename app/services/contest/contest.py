@@ -5,6 +5,8 @@ from bson import ObjectId
 from app.models.contest.contest import ContestStatus, ContestCreate, ContestUpdate
 from app.models.contest.audit import AuditAction
 from app.services.contest.audit import AuditService
+from app.utils.wallet import WalletUtils
+from app.models.payment.transaction import TransactionCategory
 import re
 
 
@@ -688,7 +690,10 @@ class ContestService:
         user_id: str,
         username: str
     ) -> Tuple[bool, str]:
-        """User joins a contest"""
+        """
+        User joins a contest.
+        If contest has an entry fee, deducts from user's wallet.
+        """
         try:
             contest = await self.contests.find_one({"_id": ObjectId(contest_id)})
             
@@ -716,6 +721,32 @@ class ContestService:
             if participant_count >= contest["max_participants"]:
                 return False, "Contest is full"
             
+            # Check and deduct entry fee if applicable
+            entry_fee = contest.get("entry_fee", 0.0)
+            transaction = None
+            
+            if entry_fee > 0:
+                wallet_utils = WalletUtils(self.db)
+                
+                # Check balance first
+                available_balance, _ = await wallet_utils.get_balance(user_id)
+                if available_balance < entry_fee:
+                    return False, f"Insufficient balance. Entry fee: {entry_fee} credits. Your balance: {available_balance} credits"
+                
+                # Deduct entry fee
+                success, message, transaction = await wallet_utils.deduct_balance(
+                    user_id=user_id,
+                    amount=entry_fee,
+                    category=TransactionCategory.CONTEST_ENTRY,
+                    description=f"Entry fee for contest: {contest.get('title', 'Unknown')}",
+                    reference_type="contest",
+                    reference_id=contest_id,
+                    idempotency_key=f"ENTRY_{contest_id}_{user_id}"
+                )
+                
+                if not success:
+                    return False, f"Failed to deduct entry fee: {message}"
+            
             # Add participant
             participant = {
                 "contest_id": contest_id,
@@ -725,7 +756,9 @@ class ContestService:
                 "total_score": 0,
                 "approved_tasks": 0,
                 "pending_tasks": 0,
-                "earnings": 0.0
+                "earnings": 0.0,
+                "entry_fee_paid": entry_fee,
+                "entry_fee_transaction_id": transaction["transaction_id"] if transaction else None
             }
             
             await self.participants.insert_one(participant)
@@ -741,7 +774,9 @@ class ContestService:
                 metadata={
                     "participant_number": participant_count + 1,
                     "max_participants": contest["max_participants"],
-                    "fill_percentage": ((participant_count + 1) / contest["max_participants"]) * 100
+                    "fill_percentage": ((participant_count + 1) / contest["max_participants"]) * 100,
+                    "entry_fee_paid": entry_fee,
+                    "transaction_id": transaction["transaction_id"] if transaction else None
                 }
             )
             

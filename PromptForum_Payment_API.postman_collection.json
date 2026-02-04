@@ -1,0 +1,1568 @@
+{
+  "info": {
+    "name": "PromptForum Payment & Wallet API",
+    "description": "Complete API collection for Payment Gateway, Wallet System, and Withdrawals.\n\n## Quick Start\n1. Set test_email and test_password in collection variables\n2. Run 'Login (Get Token)' - token saves automatically\n3. Test wallet, payment, and withdrawal endpoints\n\n## Authentication\n- All endpoints (except login) require Bearer token\n- Token is automatically included from collection auth\n- Login expects JSON body: {\"email\": \"...\", \"password\": \"...\"}\n\n## Features\n- Wallet operations (balance, transactions, stats)\n- Credit packages and payment orders (Cashfree)\n- Worldwide withdrawals (Bank, PayPal, Wise, Crypto, UPI)\n- Admin approval workflow for withdrawals\n\n## Withdrawal Methods\n- Bank Transfer: SWIFT, IBAN, ACH (US), SEPA (EU), NEFT (India)\n- Digital Wallets: PayPal, Wise, Payoneer\n- Crypto: USDT, USDC, BTC, ETH (multiple networks)\n- Regional: UPI (India), Alipay, WeChat Pay",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.2.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_email",
+      "value": "test@example.com",
+      "type": "string"
+    },
+    {
+      "key": "test_password",
+      "value": "Test123456",
+      "type": "string"
+    },
+    {
+      "key": "order_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "payment_link",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "transaction_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "withdrawal_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Authentication",
+      "description": "Authentication endpoints to get access token before testing payment APIs.\n\nIMPORTANT: Run 'Login (Get Token)' first to automatically save the access_token.\nAlternatively, manually set the 'access_token' collection variable with your token.",
+      "item": [
+        {
+          "name": "Set Token Manually (Optional)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// If you have a token already, set it here",
+                  "// pm.collectionVariables.set('access_token', 'your-token-here');",
+                  "",
+                  "console.log('Current access_token: ' + pm.collectionVariables.get('access_token'));"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// This is a dummy request to show token status",
+                  "console.log('Token in collection: ' + pm.collectionVariables.get('access_token'));",
+                  "",
+                  "pm.test('Token is set', function () {",
+                  "    var token = pm.collectionVariables.get('access_token');",
+                  "    pm.expect(token).to.not.be.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Utility request to check/set token manually.\n\nTo set token manually:\n1. Go to collection variables\n2. Set 'access_token' to your JWT token (without 'Bearer ' prefix)\n\nOr edit the pre-request script to set it programmatically."
+          },
+          "response": []
+        },
+        {
+          "name": "Login (Get Token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.success && jsonData.data) {",
+                  "        pm.collectionVariables.set('access_token', jsonData.data.access_token);",
+                  "        pm.collectionVariables.set('refresh_token', jsonData.data.refresh_token);",
+                  "        console.log('Access token saved successfully');",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test('Login successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('access_token');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email}}\",\n  \"password\": \"{{test_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Login to get access token for testing payment APIs. Expects JSON body with email and password."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Wallet",
+      "description": "Wallet management endpoints",
+      "item": [
+        {
+          "name": "Debug Auth (Test Token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Authentication test', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (pm.response.code === 200) {",
+                  "        console.log('Auth SUCCESS - User: ' + jsonData.data.email);",
+                  "    } else {",
+                  "        console.log('Auth FAILED: ' + jsonData.message);",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/debug-auth",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet", "debug-auth"]
+            },
+            "description": "Debug endpoint to test if authentication is working. Use this to verify your token is valid before testing other endpoints."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Wallet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Get wallet successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('wallet');",
+                  "});",
+                  "",
+                  "pm.test('Wallet has required fields', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    var wallet = jsonData.data.wallet;",
+                  "    pm.expect(wallet).to.have.property('balance');",
+                  "    pm.expect(wallet).to.have.property('locked_balance');",
+                  "    pm.expect(wallet).to.have.property('available_balance');",
+                  "    pm.expect(wallet).to.have.property('currency');",
+                  "    pm.expect(wallet).to.have.property('status');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet"]
+            },
+            "description": "Get current user's wallet information including balance, locked balance, and available balance."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Balance (Quick)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Get balance successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('balance');",
+                  "    pm.expect(jsonData.data).to.have.property('available_balance');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet", "balance"]
+            },
+            "description": "Quick endpoint to get just the balance information."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Transaction History",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Get transactions successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('transactions');",
+                  "    pm.expect(jsonData.data).to.have.property('pagination');",
+                  "});",
+                  "",
+                  "pm.test('Pagination info present', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    var pagination = jsonData.data.pagination;",
+                  "    pm.expect(pagination).to.have.property('total');",
+                  "    pm.expect(pagination).to.have.property('page');",
+                  "    pm.expect(pagination).to.have.property('limit');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/transactions?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet", "transactions"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "category",
+                  "value": "topup",
+                  "disabled": true
+                },
+                {
+                  "key": "type",
+                  "value": "credit",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get user's transaction history with pagination and optional filters.\n\nCategories: topup, contest_entry, contest_create, contest_prize, withdrawal, bonus, refund, admin_credit, admin_debit\n\nTypes: credit, debit, refund, lock, unlock"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Transaction History (Filter by Category)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/transactions?category=topup",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet", "transactions"],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "topup"
+                }
+              ]
+            },
+            "description": "Get transactions filtered by category (e.g., topup, contest_entry)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Wallet Stats",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Get stats successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('stats');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet", "stats"]
+            },
+            "description": "Get detailed wallet statistics including breakdown by transaction category."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Balance for Amount",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Balance check successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('required_amount');",
+                  "    pm.expect(jsonData.data).to.have.property('available_balance');",
+                  "    pm.expect(jsonData.data).to.have.property('has_sufficient_balance');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/check-balance?amount=100",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet", "check-balance"],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Check if user has sufficient balance for a specific amount. Useful before initiating transactions."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Payment Gateways",
+      "description": "Payment gateway and credit package endpoints",
+      "item": [
+        {
+          "name": "Get Available Gateways",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Get gateways successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('gateways');",
+                  "    pm.expect(jsonData.data.gateways).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('Gateway has required fields', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data.gateways.length > 0) {",
+                  "        var gateway = jsonData.data.gateways[0];",
+                  "        pm.expect(gateway).to.have.property('gateway_id');",
+                  "        pm.expect(gateway).to.have.property('name');",
+                  "        pm.expect(gateway).to.have.property('min_amount');",
+                  "        pm.expect(gateway).to.have.property('max_amount');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/gateways",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "gateways"]
+            },
+            "description": "Get list of available payment gateways with their configuration including fees and limits."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Credit Packages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Get packages successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('packages');",
+                  "    pm.expect(jsonData.data.packages).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('Package has required fields', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data.packages.length > 0) {",
+                  "        var pkg = jsonData.data.packages[0];",
+                  "        pm.expect(pkg).to.have.property('package_id');",
+                  "        pm.expect(pkg).to.have.property('name');",
+                  "        pm.expect(pkg).to.have.property('price');",
+                  "        pm.expect(pkg).to.have.property('credits');",
+                  "        pm.expect(pkg).to.have.property('total_credits');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/packages",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "packages"]
+            },
+            "description": "Get available credit packages for purchase. Each package includes price, credits, bonus credits, and discount information."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Payment Orders",
+      "description": "Create and manage payment orders",
+      "item": [
+        {
+          "name": "Create Payment Order (Custom Amount)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Create order successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('order');",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.success && jsonData.data.order) {",
+                  "        pm.collectionVariables.set('order_id', jsonData.data.order.order_id);",
+                  "        if (jsonData.data.order.payment_link) {",
+                  "            pm.collectionVariables.set('payment_link', jsonData.data.order.payment_link);",
+                  "        }",
+                  "        console.log('Order ID saved: ' + jsonData.data.order.order_id);",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test('Order has payment details', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    var order = jsonData.data.order;",
+                  "    pm.expect(order).to.have.property('order_id');",
+                  "    pm.expect(order).to.have.property('amount');",
+                  "    pm.expect(order).to.have.property('credits');",
+                  "    pm.expect(order).to.have.property('total_amount');",
+                  "    pm.expect(order).to.have.property('status');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "amount",
+                  "value": "100",
+                  "description": "Amount to pay in INR (credits = amount, 1:1 ratio)",
+                  "type": "text"
+                },
+                {
+                  "key": "gateway",
+                  "value": "cashfree",
+                  "description": "Payment gateway (cashfree, razorpay, etc.)",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/create-order",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "create-order"]
+            },
+            "description": "Create a payment order with custom amount.\n\nSecurity:\n- Credits = Amount (1:1 ratio, automatic)\n- Email from logged-in user\n- Phone default: 9999999999\n- Return URL from DB gateway config"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Payment Order (Using Package)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Create order with package successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.success && jsonData.data.order) {",
+                  "        pm.collectionVariables.set('order_id', jsonData.data.order.order_id);",
+                  "        console.log('Package Order ID saved: ' + jsonData.data.order.order_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "amount",
+                  "value": "499",
+                  "description": "Will be overridden by package price",
+                  "type": "text"
+                },
+                {
+                  "key": "package_id",
+                  "value": "popular",
+                  "description": "Package ID from /packages endpoint",
+                  "type": "text"
+                },
+                {
+                  "key": "gateway",
+                  "value": "cashfree",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/create-order",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "create-order"]
+            },
+            "description": "Create a payment order using a predefined credit package.\n\nPackage details (price, credits + bonus) override the amount parameter."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Order Details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Get order successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('order');",
+                  "});",
+                  "",
+                  "pm.test('Order has expected fields', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    var order = jsonData.data.order;",
+                  "    pm.expect(order).to.have.property('order_id');",
+                  "    pm.expect(order).to.have.property('status');",
+                  "    pm.expect(order).to.have.property('amount');",
+                  "    pm.expect(order).to.have.property('credits');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/order/{{order_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "order", "{{order_id}}"]
+            },
+            "description": "Get details of a specific payment order. Only the order owner can view."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Order Status (Poll)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Get status successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('status');",
+                  "});",
+                  "",
+                  "pm.test('Status has order_id and status', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    var status = jsonData.data.status;",
+                  "    pm.expect(status).to.have.property('order_id');",
+                  "    pm.expect(status).to.have.property('status');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/order/{{order_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "order", "{{order_id}}", "status"]
+            },
+            "description": "Get payment order status. Polls the payment gateway if the order is still pending. Use this to check if payment was successful."
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Orders (History)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Get orders successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    pm.expect(jsonData.data).to.have.property('orders');",
+                  "    pm.expect(jsonData.data).to.have.property('pagination');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/orders?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "orders"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "status",
+                  "value": "paid",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get user's payment order history with pagination. Can filter by status (created, pending, paid, failed, expired, cancelled, refunded)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Paid Orders Only",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/orders?status=paid",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "orders"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "paid"
+                }
+              ]
+            },
+            "description": "Get only paid orders from history"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Webhooks",
+      "description": "Webhook endpoints for payment notifications",
+      "item": [
+        {
+          "name": "Webhook Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Webhook endpoint healthy', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.equal('ok');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/webhook/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "webhook", "health"]
+            },
+            "description": "Health check endpoint to verify webhook URL is accessible. Use this to configure webhook URL in payment gateway dashboard."
+          },
+          "response": []
+        },
+        {
+          "name": "Simulate Cashfree Webhook (Test Only)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// NOTE: This is for testing only.",
+                  "// In production, webhooks come directly from Cashfree with valid signatures.",
+                  "// This request will fail signature verification unless you compute the correct signature.",
+                  "",
+                  "console.log('WARNING: This is a test webhook. It will fail signature verification without proper HMAC.');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-webhook-timestamp",
+                "value": "{{$timestamp}}",
+                "description": "Webhook timestamp"
+              },
+              {
+                "key": "x-webhook-signature",
+                "value": "test-signature-will-fail",
+                "description": "HMAC signature (compute properly for valid test)"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"order\": {\n      \"order_id\": \"{{order_id}}\",\n      \"cf_order_id\": \"123456789\",\n      \"order_amount\": 100,\n      \"order_status\": \"PAID\"\n    },\n    \"payment\": {\n      \"cf_payment_id\": \"987654321\",\n      \"payment_amount\": 100,\n      \"payment_method\": {\n        \"type\": \"upi\"\n      }\n    }\n  },\n  \"event_time\": \"2024-01-15T10:30:00Z\",\n  \"type\": \"PAYMENT_SUCCESS_WEBHOOK\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/webhook/cashfree",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "webhook", "cashfree"]
+            },
+            "description": "Simulate a Cashfree webhook for testing.\n\nNOTE: This will fail signature verification unless you compute the correct HMAC-SHA256 signature using:\n1. Concatenate: timestamp + raw_body\n2. HMAC-SHA256 with your CASHFREE_SECRET_KEY\n3. Base64 encode the result\n\nIn production, Cashfree sends properly signed webhooks automatically."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Complete Flow Tests",
+      "description": "End-to-end test scenarios",
+      "item": [
+        {
+          "name": "Flow 1: Check Balance Before Purchase",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Can check balance', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    console.log('Current balance: ' + jsonData.data.balance);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet", "balance"]
+            },
+            "description": "Step 1: Check current balance before making a purchase"
+          },
+          "response": []
+        },
+        {
+          "name": "Flow 2: Get Available Packages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Packages available', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.data.packages.length).to.be.greaterThan(0);",
+                  "    console.log('Available packages: ' + jsonData.data.packages.length);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/packages",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "packages"]
+            },
+            "description": "Step 2: View available credit packages"
+          },
+          "response": []
+        },
+        {
+          "name": "Flow 3: Create Order for Popular Package",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Order created', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.be.true;",
+                  "    ",
+                  "    if (jsonData.data.order) {",
+                  "        pm.collectionVariables.set('order_id', jsonData.data.order.order_id);",
+                  "        console.log('Order created: ' + jsonData.data.order.order_id);",
+                  "        console.log('Payment link: ' + jsonData.data.order.payment_link);",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "amount",
+                  "value": "499",
+                  "type": "text"
+                },
+                {
+                  "key": "package_id",
+                  "value": "popular",
+                  "type": "text"
+                },
+                {
+                  "key": "gateway",
+                  "value": "cashfree",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payments/create-order",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "create-order"]
+            },
+            "description": "Step 3: Create payment order for the Popular package. Email from user, phone default, return URL from DB."
+          },
+          "response": []
+        },
+        {
+          "name": "Flow 4: Check Order Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status retrieved', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    console.log('Order status: ' + jsonData.data.status.status);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/order/{{order_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "payments", "order", "{{order_id}}", "status"]
+            },
+            "description": "Step 4: Check order status (poll after user completes payment)"
+          },
+          "response": []
+        },
+        {
+          "name": "Flow 5: Verify Balance Updated",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Balance check', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    console.log('Updated balance: ' + jsonData.data.balance);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet", "balance"]
+            },
+            "description": "Step 5: Verify balance was updated after successful payment"
+          },
+          "response": []
+        },
+        {
+          "name": "Flow 6: Check Transaction History",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Transactions retrieved', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var jsonData = pm.response.json();",
+                  "    console.log('Total transactions: ' + jsonData.data.pagination.total);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/transactions?limit=5",
+              "host": ["{{base_url}}"],
+              "path": ["api", "wallet", "transactions"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Step 6: View recent transactions to confirm credit was added"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Withdrawals (Dynamic)",
+      "description": "## Fully Dynamic Withdrawal System\n\nAll settings from database - no hardcoded values!\n\n### Configuration (from DB):\n- Global limits & fees: `withdrawal_config` collection\n- Payment methods: `withdrawal_methods` collection\n\n### Initialize Data:\n```bash\npython seed_withdrawal.py\n```\n\n### Supported Methods (dynamic):\n- Bank Transfer: ACH (US), SEPA (EU), SWIFT, NEFT (India)\n- Digital Wallets: PayPal, Wise, Payoneer, Skrill\n- Crypto: USDT (TRC20/ERC20), USDC, BTC, ETH\n- Regional: UPI (India), Alipay, WeChat Pay\n\n### Flow:\n1. GET /methods - Get available methods\n2. POST /calculate-fees - Preview fees\n3. POST /request - Submit with method_id + payment_details\n4. Admin: approve/reject via DB\n5. Admin: mark complete after manual payment",
+      "item": [
+        {
+          "name": "Get Withdrawal Config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/config",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "config"]
+            },
+            "description": "Get full withdrawal configuration from database:\n- Global limits\n- Platform fees\n- Supported currencies\n- Available methods with their fees"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Available Methods",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/methods",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "methods"],
+              "query": [
+                {"key": "currency", "value": "USD", "description": "Filter by currency", "disabled": true}
+              ]
+            },
+            "description": "Get all active withdrawal methods from database.\n\nEach method shows:\n- method_id (use this in /request)\n- name, description\n- supported currencies/countries\n- fees (type, fixed, percentage)\n- limits (min/max amount)\n- processing time"
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Withdrawal Limits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/limits",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "limits"]
+            },
+            "description": "Get your personal withdrawal limits:\n- Daily/monthly limits\n- Current usage\n- Remaining amounts\n- Pending requests count\n- Cooldown status"
+          },
+          "response": []
+        },
+        {
+          "name": "Calculate Fees",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/calculate-fees?amount=1000&method_id=bank_transfer_ach&currency=USD",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "calculate-fees"],
+              "query": [
+                {"key": "amount", "value": "1000", "description": "Amount in credits"},
+                {"key": "method_id", "value": "bank_transfer_ach", "description": "Method ID from /methods"},
+                {"key": "currency", "value": "USD", "description": "Target currency"}
+              ]
+            },
+            "description": "Preview fees before submitting request.\n\nFees calculated dynamically:\n- Method fee (from withdrawal_methods)\n- Platform fee (from withdrawal_config)\n- Net amount after all fees"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: Bank ACH (US)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "        console.log('Withdrawal ID: ' + jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1000,\n  \"method_id\": \"bank_transfer_ach\",\n  \"currency\": \"USD\",\n  \"payment_details\": {\n    \"account_holder_name\": \"John Doe\",\n    \"bank_name\": \"Bank of America\",\n    \"account_number\": \"123456789\",\n    \"routing_number\": \"026009593\"\n  },\n  \"notes\": \"Monthly withdrawal\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "US domestic bank transfer (ACH - free)"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: Bank SEPA (EU)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500,\n  \"method_id\": \"bank_transfer_sepa\",\n  \"currency\": \"EUR\",\n  \"payment_details\": {\n    \"account_holder_name\": \"Hans Mueller\",\n    \"iban\": \"DE89370400440532013000\",\n    \"bic\": \"DEUTDEDB\"\n  },\n  \"notes\": \"SEPA transfer\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "EU SEPA bank transfer (low fee)"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: Bank SWIFT (International)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 2000,\n  \"method_id\": \"bank_transfer_international\",\n  \"currency\": \"USD\",\n  \"payment_details\": {\n    \"account_holder_name\": \"John Doe\",\n    \"bank_name\": \"HSBC\",\n    \"account_number\": \"1234567890\",\n    \"swift_code\": \"HSBCHKHH\",\n    \"country\": \"HK\"\n  },\n  \"notes\": \"International wire\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "International bank transfer via SWIFT"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: Bank India (NEFT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5000,\n  \"method_id\": \"bank_transfer_india\",\n  \"currency\": \"INR\",\n  \"payment_details\": {\n    \"account_holder_name\": \"Rajesh Kumar\",\n    \"bank_name\": \"State Bank of India\",\n    \"account_number\": \"12345678901234\",\n    \"ifsc_code\": \"SBIN0001234\"\n  },\n  \"notes\": \"NEFT transfer\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "India bank transfer via IMPS/NEFT"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: UPI (India)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1000,\n  \"method_id\": \"upi\",\n  \"currency\": \"INR\",\n  \"payment_details\": {\n    \"upi_id\": \"username@upi\",\n    \"account_holder_name\": \"Rajesh Kumar\"\n  },\n  \"notes\": \"UPI instant\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "India UPI instant transfer (free)"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: PayPal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500,\n  \"method_id\": \"paypal\",\n  \"currency\": \"USD\",\n  \"payment_details\": {\n    \"email\": \"user@example.com\",\n    \"account_holder_name\": \"John Doe\"\n  },\n  \"notes\": \"PayPal withdrawal\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "PayPal withdrawal"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: Wise",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500,\n  \"method_id\": \"wise\",\n  \"currency\": \"GBP\",\n  \"payment_details\": {\n    \"email\": \"user@example.com\",\n    \"account_holder_name\": \"Jane Smith\"\n  },\n  \"notes\": \"Wise low-fee transfer\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "Wise (TransferWise) low-fee transfer"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: Crypto USDT (TRC20)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1000,\n  \"method_id\": \"crypto_usdt_trc20\",\n  \"currency\": \"USDT\",\n  \"payment_details\": {\n    \"wallet_address\": \"TXyz1234567890abcdefghijklmnopqrstuv\"\n  },\n  \"notes\": \"USDT TRC20 - low fees\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "USDT on Tron network (low fees)"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: Crypto USDT (ERC20)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1000,\n  \"method_id\": \"crypto_usdt_erc20\",\n  \"currency\": \"USDT\",\n  \"payment_details\": {\n    \"wallet_address\": \"0x1234567890abcdef1234567890abcdef12345678\"\n  },\n  \"notes\": \"USDT ERC20 - higher gas\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "USDT on Ethereum (higher gas fees)"
+          },
+          "response": []
+        },
+        {
+          "name": "Request: Crypto USDC",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.data && jsonData.data.withdrawal) {",
+                  "        pm.collectionVariables.set('withdrawal_id', jsonData.data.withdrawal.withdrawal_id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1000,\n  \"method_id\": \"crypto_usdc\",\n  \"currency\": \"USDC\",\n  \"payment_details\": {\n    \"wallet_address\": \"0x1234567890abcdef1234567890abcdef12345678\"\n  },\n  \"notes\": \"USDC ERC20\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "request"]
+            },
+            "description": "USDC on Ethereum"
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Withdrawals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "limit", "value": "20"},
+                {"key": "status", "value": "pending", "disabled": true}
+              ]
+            },
+            "description": "Get your withdrawal history. Filter by status: pending, approved, processing, completed, rejected, cancelled"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Withdrawal Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/{{withdrawal_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "{{withdrawal_id}}"]
+            },
+            "description": "Get specific withdrawal details"
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Withdrawal",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/withdrawals/{{withdrawal_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api", "withdrawals", "{{withdrawal_id}}", "cancel"]
+            },
+            "description": "Cancel a pending withdrawal. Only PENDING status can be cancelled."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

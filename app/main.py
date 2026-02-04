@@ -20,6 +20,10 @@ from app.routes.contest.submission_routes import contest_router as contest_submi
 from app.routes.contest.leaderboard_routes import router as leaderboard_router
 from app.routes.contest.user_contests_routes import router as user_contests_router
 from app.routes.search.search_routes import router as search_router
+from app.routes.payment.wallet_routes import router as wallet_router
+from app.routes.payment.payment_routes import router as payment_router
+from app.routes.payment.webhook_routes import router as webhook_router
+from app.routes.payment.withdrawal_routes import router as withdrawal_router
 
 # Load environment variables
 load_dotenv()
@@ -53,10 +57,21 @@ app = FastAPI(
 )
 
 # CORS middleware
+# In development, allow all origins for easier testing
+DEBUG = os.getenv("DEBUG", "True").lower() == "true"
+
+cors_origins = [
+    FRONTEND_URL, 
+    "http://localhost:3000", 
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:3000", "http://localhost:5173"],
-    allow_credentials=True,
+    allow_origins=cors_origins if not DEBUG else ["*"],
+    allow_credentials=not DEBUG,  # Can't use credentials with wildcard origin
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -76,6 +91,10 @@ app.include_router(submission_router, prefix="/api")  # Generic submission opera
 app.include_router(leaderboard_router, prefix="/api")
 app.include_router(user_contests_router)  # User contest routes (already has /api prefix)
 app.include_router(search_router, prefix="/api")  # Global search
+app.include_router(wallet_router, prefix="/api")  # Wallet operations
+app.include_router(payment_router, prefix="/api")  # Payment operations
+app.include_router(webhook_router, prefix="/api")  # Payment webhooks
+app.include_router(withdrawal_router, prefix="/api")  # Withdrawal operations
 
 # Mount uploads directory for static file serving
 uploads_path = Path("uploads")
@@ -97,3 +116,10 @@ async def read_root():
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+@app.get("/test-payment")
+async def test_payment_page():
+    """Serve test payment HTML page"""
+    from fastapi.responses import FileResponse
+    return FileResponse("test_payment.html", media_type="text/html")
