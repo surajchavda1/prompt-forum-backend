@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from typing import List
 from app.database import Database
 from app.services.forum.category import CategoryService
+from app.services.forum.tag import TagService
 from app.models.forum.category import (
     CategoryResponse,
     CategoryWithSubcategories,
@@ -43,13 +44,15 @@ async def get_all_categories():
 async def get_categories_tree():
     """
     Get categories in tree structure (parent with subcategories).
+    Each subcategory includes a tag_count field.
     """
     db = Database.get_db()
     category_service = CategoryService(db)
+    tag_service = TagService(db)
     
     categories = await category_service.get_categories_with_subcategories()
     
-    # Convert ObjectId and datetime to string
+    # Convert ObjectId and datetime to string, and add tag counts
     for parent in categories:
         parent["id"] = str(parent["_id"])
         del parent["_id"]
@@ -59,12 +62,17 @@ async def get_categories_tree():
             parent["updated_at"] = parent["updated_at"].isoformat()
         
         for sub in parent.get("subcategories", []):
-            sub["id"] = str(sub["_id"])
+            sub_id = str(sub["_id"])
+            sub["id"] = sub_id
             del sub["_id"]
             if sub.get("created_at"):
                 sub["created_at"] = sub["created_at"].isoformat()
             if sub.get("updated_at"):
                 sub["updated_at"] = sub["updated_at"].isoformat()
+            
+            # Add tag count for each subcategory
+            tags = await tag_service.get_tags_by_subcategory(sub_id)
+            sub["tag_count"] = len(tags)
     
     return success_response(
         message="Category tree retrieved successfully",
@@ -144,9 +152,13 @@ async def get_category(identifier: str):
     
     - If identifier is a valid 24-character hex string, treats it as category_id
     - Otherwise, treats it as a slug
+    
+    For parent categories: Returns subcategories list
+    For subcategories: Returns tags list (for Category -> Subcategory -> Tags flow)
     """
     db = Database.get_db()
     category_service = CategoryService(db)
+    tag_service = TagService(db)
     
     # Check if identifier is a valid ObjectId (24 hex characters)
     is_object_id = len(identifier) == 24 and all(c in '0123456789abcdef' for c in identifier.lower())
@@ -162,7 +174,7 @@ async def get_category(identifier: str):
             status_code=404
         )
     
-    # Get subcategories if it's a parent
+    # Get subcategories if it's a parent category (no parent_id)
     if not category.get("parent_id"):
         subcategories = await category_service.get_subcategories(str(category["_id"]))
         category["subcategories"] = subcategories
@@ -174,6 +186,20 @@ async def get_category(identifier: str):
                 sub["created_at"] = sub["created_at"].isoformat()
             if sub.get("updated_at"):
                 sub["updated_at"] = sub["updated_at"].isoformat()
+    else:
+        # It's a subcategory - get its tags
+        tags = await tag_service.get_tags_by_subcategory(str(category["_id"]))
+        
+        # Convert tags to JSON-serializable format
+        for tag in tags:
+            tag["id"] = str(tag["_id"])
+            del tag["_id"]
+            if tag.get("created_at"):
+                tag["created_at"] = tag["created_at"].isoformat()
+            if tag.get("updated_at"):
+                tag["updated_at"] = tag["updated_at"].isoformat()
+        
+        category["tags"] = tags
     
     # Convert ObjectId and datetime to string
     category["id"] = str(category["_id"])
@@ -186,6 +212,63 @@ async def get_category(identifier: str):
     return success_response(
         message="Category retrieved successfully",
         data={"category": category}
+    )
+
+
+@router.get("/{identifier}/tags")
+async def get_subcategory_tags(identifier: str):
+    """
+    Get tags for a specific subcategory.
+    
+    This is the endpoint to call when user selects a subcategory
+    to show available tags.
+    
+    Flow: Category -> Subcategory -> Tags (this endpoint)
+    
+    Args:
+        identifier: Subcategory ID or slug
+    
+    Returns:
+        List of tags belonging to the subcategory
+    """
+    db = Database.get_db()
+    category_service = CategoryService(db)
+    tag_service = TagService(db)
+    
+    # Check if identifier is a valid ObjectId (24 hex characters)
+    is_object_id = len(identifier) == 24 and all(c in '0123456789abcdef' for c in identifier.lower())
+    
+    if is_object_id:
+        subcategory = await category_service.get_category_by_id(identifier)
+    else:
+        subcategory = await category_service.get_category_by_slug(identifier)
+    
+    if not subcategory:
+        return error_response(
+            message="Subcategory not found",
+            status_code=404
+        )
+    
+    # Get tags for this subcategory
+    tags = await tag_service.get_tags_by_subcategory(str(subcategory["_id"]))
+    
+    # Convert to JSON-serializable format
+    for tag in tags:
+        tag["id"] = str(tag["_id"])
+        del tag["_id"]
+        if tag.get("created_at"):
+            tag["created_at"] = tag["created_at"].isoformat()
+        if tag.get("updated_at"):
+            tag["updated_at"] = tag["updated_at"].isoformat()
+    
+    return success_response(
+        message="Tags retrieved successfully",
+        data={
+            "tags": tags,
+            "subcategory_id": str(subcategory["_id"]) if "_id" in subcategory else subcategory.get("id"),
+            "subcategory_name": subcategory.get("name"),
+            "subcategory_slug": subcategory.get("slug")
+        }
     )
 
 

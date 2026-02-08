@@ -526,6 +526,7 @@ class SubmissionService:
             contest_id = submission["contest_id"]
             
             # If status changed from pending to approved
+            points = 0
             if old_status == SubmissionStatus.PENDING and new_status == SubmissionStatus.APPROVED:
                 # Get task points
                 task = await self.tasks.find_one({"_id": ObjectId(submission["task_id"])})
@@ -541,6 +542,11 @@ class SubmissionService:
                         }
                     }
                 )
+                
+                # Update weighted score for prize distribution
+                from app.services.contest.scoring import ScoringService
+                scoring_service = ScoringService(self.db)
+                await scoring_service.update_participant_weighted_score(contest_id, user_id)
             
             # If status changed from approved back to pending/rejected
             elif old_status == SubmissionStatus.APPROVED and new_status != SubmissionStatus.APPROVED:
@@ -559,6 +565,11 @@ class SubmissionService:
                         }
                     }
                 )
+                
+                # Update weighted score for prize distribution
+                from app.services.contest.scoring import ScoringService
+                scoring_service = ScoringService(self.db)
+                await scoring_service.update_participant_weighted_score(contest_id, user_id)
             
             # Log review to audit trail (SECURITY: Track all approvals/rejections)
             await self.audit_service.log_action(

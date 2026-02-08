@@ -46,10 +46,10 @@ async def create_task(
     contest_identifier: str,
     title: str = Form(..., min_length=5, max_length=200),
     description: str = Form(..., min_length=20),
-    points: int = Form(..., gt=0),
+    points: int = Form(..., gt=0, le=100, description="Points (1-100)"),
     order: int = Form(..., ge=1),
-    requirements: Optional[str] = Form(None),
-    deliverables: Optional[str] = Form(None),
+    requirements: str = Form(..., min_length=10, description="Task requirements"),
+    deliverables: str = Form(..., min_length=10, description="Expected deliverables"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -59,6 +59,9 @@ async def create_task(
     - Only contest owner can add tasks
     - Only allowed in DRAFT status
     - Cannot add tasks after contest starts
+    - Points: 1-100 (required)
+    - Requirements: required (min 10 chars)
+    - Deliverables: required (min 10 chars)
     """
     if not current_user:
         return error_response(
@@ -180,12 +183,12 @@ async def get_task(
 async def update_task(
     contest_identifier: str,
     task_id: str,
-    title: Optional[str] = Form(None),
-    description: Optional[str] = Form(None),
-    points: Optional[int] = Form(None),
-    order: Optional[int] = Form(None),
-    requirements: Optional[str] = Form(None),
-    deliverables: Optional[str] = Form(None),
+    title: Optional[str] = Form(None, min_length=5, max_length=200),
+    description: Optional[str] = Form(None, min_length=20),
+    points: Optional[int] = Form(None, gt=0, le=100, description="Points (1-100)"),
+    order: Optional[int] = Form(None, ge=1),
+    requirements: Optional[str] = Form(None, min_length=10),
+    deliverables: Optional[str] = Form(None, min_length=10),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -194,6 +197,7 @@ async def update_task(
     - Only contest owner
     - Only in DRAFT status
     - Cannot edit after contest starts
+    - Points max: 100
     """
     if not current_user:
         return error_response(

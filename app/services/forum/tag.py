@@ -36,6 +36,7 @@ class TagService:
         name: str,
         slug: str,
         description: Optional[str] = None,
+        subcategory_id: Optional[str] = None,
         group: Optional[str] = None,
         color: Optional[str] = None
     ) -> Dict:
@@ -44,6 +45,7 @@ class TagService:
             "name": name,
             "slug": slug,
             "description": description,
+            "subcategory_id": subcategory_id,
             "group": group,
             "color": color,
             "usage_count": 0,  # Legacy field, actual count is calculated dynamically
@@ -88,6 +90,35 @@ class TagService:
         tags = await cursor.to_list(length=None)
         return await self._add_usage_counts(tags)
     
+    async def get_tags_by_subcategory(self, subcategory_id: str) -> List[Dict]:
+        """
+        Get tags by subcategory ID with dynamic usage counts.
+        This is the main method for the Category -> Subcategory -> Tags flow.
+        """
+        cursor = self.collection.find({
+            "subcategory_id": subcategory_id,
+            "is_active": True
+        }).sort("name", 1)
+        tags = await cursor.to_list(length=None)
+        return await self._add_usage_counts(tags)
+    
+    async def get_tags_by_subcategory_slug(self, subcategory_slug: str) -> List[Dict]:
+        """
+        Get tags by subcategory slug.
+        First finds the subcategory, then returns its tags.
+        """
+        # Find the subcategory by slug
+        categories_collection = self.db.categories
+        subcategory = await categories_collection.find_one({
+            "slug": subcategory_slug,
+            "is_active": True
+        })
+        
+        if not subcategory:
+            return []
+        
+        return await self.get_tags_by_subcategory(str(subcategory["_id"]))
+    
     async def get_popular_tags(self, limit: int = 50) -> List[Dict]:
         """Get most used tags (calculated dynamically)"""
         # Get all active tags
@@ -102,12 +133,20 @@ class TagService:
         
         return tags[:limit]
     
-    async def search_tags(self, query: str) -> List[Dict]:
-        """Search tags by name with dynamic usage counts"""
-        cursor = self.collection.find({
+    async def search_tags(self, query: str, subcategory_id: Optional[str] = None) -> List[Dict]:
+        """
+        Search tags by name with dynamic usage counts.
+        Optionally filter by subcategory_id.
+        """
+        filter_query = {
             "name": {"$regex": query, "$options": "i"},
             "is_active": True
-        }).limit(20)
+        }
+        
+        if subcategory_id:
+            filter_query["subcategory_id"] = subcategory_id
+        
+        cursor = self.collection.find(filter_query).limit(20)
         tags = await cursor.to_list(length=None)
         return await self._add_usage_counts(tags)
     

@@ -44,8 +44,27 @@ async def lifespan(app: FastAPI):
     uploads_dir = Path("uploads")
     uploads_dir.mkdir(exist_ok=True)
     
+    # Setup and start the background scheduler for contest lifecycle
+    try:
+        from app.core.scheduler import setup_scheduler, start_scheduler
+        setup_scheduler()
+        start_scheduler()
+        print("[STARTUP] Contest scheduler initialized")
+    except ImportError as e:
+        print(f"[WARN] APScheduler not installed, contest automation disabled: {e}")
+    except Exception as e:
+        print(f"[ERROR] Failed to start scheduler: {e}")
+    
     yield
+    
     # Shutdown
+    try:
+        from app.core.scheduler import stop_scheduler
+        stop_scheduler()
+        print("[SHUTDOWN] Contest scheduler stopped")
+    except Exception as e:
+        print(f"[ERROR] Failed to stop scheduler: {e}")
+    
     await Database.close_db()
 
 

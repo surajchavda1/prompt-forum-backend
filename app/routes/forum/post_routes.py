@@ -92,46 +92,47 @@ async def create_post(
                 errors={"subcategory_id": "Subcategory doesn't belong to the selected category"}
             )
     
-    # Process tags
+    # Process tags - Users can ONLY select from existing tags linked to the subcategory
     tag_list = []
     invalid_tags = []
-    if tags.strip():
-        tag_names = [t.strip().lower() for t in tags.split(',') if t.strip()]
-        tag_names = list(set(tag_names))[:10]  # Max 10 unique tags
+    
+    if tags.strip() and subcategory_id:
+        # Get valid tags for this subcategory
+        valid_subcategory_tags = await tag_service.get_tags_by_subcategory(subcategory_id)
+        valid_tag_slugs = {tag["slug"] for tag in valid_subcategory_tags}
+        valid_tag_names = {tag["name"].lower() for tag in valid_subcategory_tags}
         
-        for tag_name in tag_names:
-            # Validate tag length (2-30 characters)
-            if len(tag_name) < 2:
-                invalid_tags.append(f"'{tag_name}' is too short (min 2 chars)")
-                continue
-            if len(tag_name) > 30:
-                invalid_tags.append(f"'{tag_name[:20]}...' is too long (max 30 chars)")
-                continue
+        # Parse submitted tags (comma-separated slugs or names)
+        submitted_tags = [t.strip() for t in tags.split(',') if t.strip()]
+        submitted_tags = list(set(submitted_tags))[:10]  # Max 10 unique tags
+        
+        for tag_input in submitted_tags:
+            tag_input_lower = tag_input.lower()
             
-            # Validate tag format (alphanumeric, hyphens, spaces only)
-            import re
-            if not re.match(r'^[a-z0-9][a-z0-9\s\-]*[a-z0-9]$|^[a-z0-9]$', tag_name):
-                invalid_tags.append(f"'{tag_name[:20]}' has invalid characters")
-                continue
+            # Find matching tag by slug or name
+            matched_tag = None
+            for tag in valid_subcategory_tags:
+                if tag["slug"] == tag_input or tag["name"].lower() == tag_input_lower:
+                    matched_tag = tag
+                    break
             
-            # Check if tag exists
-            existing_tag = await tag_service.get_tag_by_slug(tag_name)
-            if existing_tag:
-                # Increment usage count
-                await tag_service.increment_usage_count(str(existing_tag["_id"]))
-                tag_list.append(tag_name)
+            if matched_tag:
+                tag_list.append(matched_tag["slug"])
             else:
-                # Create new tag with "Community" group
-                new_tag = await tag_service.create_tag(
-                    name=tag_name,
-                    slug=tag_name,
-                    description=f"User-created tag: {tag_name}",
-                    group="Community",
-                    color="#06B6D4"
-                )
-                # Increment usage count for newly created tag
-                await tag_service.increment_usage_count(str(new_tag["_id"]))
-                tag_list.append(tag_name)
+                invalid_tags.append(f"'{tag_input}' is not a valid tag for this subcategory")
+        
+        # Return error if any invalid tags were provided
+        if invalid_tags:
+            return validation_error_response(
+                message="Invalid tags provided",
+                errors={"tags": invalid_tags}
+            )
+    elif tags.strip() and not subcategory_id:
+        # Tags provided but no subcategory selected
+        return validation_error_response(
+            message="Subcategory required for tags",
+            errors={"subcategory_id": "Please select a subcategory to use tags"}
+        )
     
     # Handle file uploads
     attachments = []
@@ -595,22 +596,52 @@ async def update_post(
         update_data["subcategory_id"] = subcategory_id if subcategory_id else None
     if body:
         update_data["body"] = body
+    
+    # Process tags - validate against subcategory tags only (no custom tags allowed)
     if tags is not None:
-        import re
-        tag_names = [t.strip().lower() for t in tags.split(',') if t.strip()]
-        tag_names = list(set(tag_names))[:10]  # Max 10 unique tags
+        tag_service = TagService(db)
+        effective_subcategory_id = subcategory_id or post.get("subcategory_id")
         
-        # Validate each tag
-        valid_tags = []
-        for tag_name in tag_names:
-            # Skip invalid tags (too short, too long, or invalid characters)
-            if len(tag_name) < 2 or len(tag_name) > 30:
-                continue
-            if not re.match(r'^[a-z0-9][a-z0-9\s\-]*[a-z0-9]$|^[a-z0-9]$', tag_name):
-                continue
-            valid_tags.append(tag_name)
-        
-        update_data["tags"] = valid_tags
+        if tags.strip() and effective_subcategory_id:
+            # Get valid tags for the subcategory
+            valid_subcategory_tags = await tag_service.get_tags_by_subcategory(effective_subcategory_id)
+            valid_tag_slugs = {tag["slug"] for tag in valid_subcategory_tags}
+            
+            # Parse and validate submitted tags
+            submitted_tags = [t.strip() for t in tags.split(',') if t.strip()]
+            submitted_tags = list(set(submitted_tags))[:10]
+            
+            validated_tags = []
+            invalid_tags = []
+            
+            for tag_input in submitted_tags:
+                tag_input_lower = tag_input.lower()
+                matched_tag = None
+                for tag in valid_subcategory_tags:
+                    if tag["slug"] == tag_input or tag["name"].lower() == tag_input_lower:
+                        matched_tag = tag
+                        break
+                
+                if matched_tag:
+                    validated_tags.append(matched_tag["slug"])
+                else:
+                    invalid_tags.append(f"'{tag_input}' is not a valid tag for this subcategory")
+            
+            if invalid_tags:
+                return validation_error_response(
+                    message="Invalid tags provided",
+                    errors={"tags": invalid_tags}
+                )
+            
+            update_data["tags"] = validated_tags
+        elif tags.strip() and not effective_subcategory_id:
+            return validation_error_response(
+                message="Subcategory required for tags",
+                errors={"subcategory_id": "Please select a subcategory to use tags"}
+            )
+        else:
+            # Empty tags - clear them
+            update_data["tags"] = []
     
     if not update_data:
         return validation_error_response(

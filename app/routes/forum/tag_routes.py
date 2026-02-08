@@ -64,6 +64,63 @@ async def get_popular_tags(limit: int = Query(50, le=100)):
     )
 
 
+@router.get("/subcategory/{subcategory_id}")
+async def get_tags_by_subcategory(subcategory_id: str):
+    """
+    Get tags by subcategory ID.
+    
+    This is the main endpoint for the Category -> Subcategory -> Tags flow.
+    When frontend selects a subcategory, call this endpoint to get available tags.
+    
+    Args:
+        subcategory_id: The ID of the subcategory
+    
+    Returns:
+        List of tags belonging to the specified subcategory
+    """
+    db = Database.get_db()
+    tag_service = TagService(db)
+    
+    tags = await tag_service.get_tags_by_subcategory(subcategory_id)
+    
+    # Convert to JSON-serializable format
+    for tag in tags:
+        convert_tag_to_json(tag)
+    
+    return success_response(
+        message="Tags retrieved successfully",
+        data={"tags": tags, "subcategory_id": subcategory_id}
+    )
+
+
+@router.get("/subcategory-slug/{subcategory_slug}")
+async def get_tags_by_subcategory_slug(subcategory_slug: str):
+    """
+    Get tags by subcategory slug.
+    
+    Alternative endpoint using slug instead of ID.
+    
+    Args:
+        subcategory_slug: The slug of the subcategory (e.g., "chatgpt-image-prompts")
+    
+    Returns:
+        List of tags belonging to the specified subcategory
+    """
+    db = Database.get_db()
+    tag_service = TagService(db)
+    
+    tags = await tag_service.get_tags_by_subcategory_slug(subcategory_slug)
+    
+    # Convert to JSON-serializable format
+    for tag in tags:
+        convert_tag_to_json(tag)
+    
+    return success_response(
+        message="Tags retrieved successfully",
+        data={"tags": tags, "subcategory_slug": subcategory_slug}
+    )
+
+
 @router.get("/group/{group_name}")
 async def get_tags_by_group(group_name: str):
     """
@@ -85,14 +142,18 @@ async def get_tags_by_group(group_name: str):
 
 
 @router.get("/search")
-async def search_tags(q: str = Query(..., min_length=1)):
+async def search_tags(
+    q: str = Query(..., min_length=1),
+    subcategory_id: Optional[str] = Query(None, description="Optional: Filter by subcategory ID")
+):
     """
     Search tags by name.
+    Optionally filter by subcategory_id for scoped search.
     """
     db = Database.get_db()
     tag_service = TagService(db)
     
-    tags = await tag_service.search_tags(q)
+    tags = await tag_service.search_tags(q, subcategory_id=subcategory_id)
     
     # Convert to JSON-serializable format
     for tag in tags:
@@ -100,7 +161,7 @@ async def search_tags(q: str = Query(..., min_length=1)):
     
     return success_response(
         message="Search results retrieved successfully",
-        data={"tags": tags, "query": q}
+        data={"tags": tags, "query": q, "subcategory_id": subcategory_id}
     )
 
 

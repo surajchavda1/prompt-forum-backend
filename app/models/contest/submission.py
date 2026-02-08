@@ -27,8 +27,8 @@ class SubmissionUpdate(BaseModel):
 class SubmissionReview(BaseModel):
     """Schema for owner reviewing a submission"""
     status: SubmissionStatus = Field(..., description="approved, rejected, or revision_requested")
-    feedback: Optional[str] = None
-    score: Optional[int] = Field(None, ge=0, le=100, description="Score out of 100")
+    feedback: str = Field(..., min_length=5, description="Review feedback (required)")
+    score: int = Field(..., ge=0, le=100, description="Score out of 100 (required)")
 
 
 class SubmissionResponse(BaseModel):

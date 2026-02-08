@@ -75,7 +75,9 @@ async def resolve_contest_id(identifier: str, db) -> Optional[str]:
 async def create_contest(
     title: str = Form(..., min_length=10, max_length=200),
     description: str = Form(..., min_length=50),
-    category: str = Form(...),
+    category_id: str = Form(..., description="Main category ID"),
+    subcategory_id: Optional[str] = Form(None, description="Subcategory ID"),
+    tags: str = Form("", description="Comma-separated tag slugs"),
     difficulty: ContestDifficulty = Form(...),
     total_prize: float = Form(..., gt=0),
     max_participants: int = Form(..., gt=0),
@@ -90,6 +92,11 @@ async def create_contest(
     
     NOTE: Contest type is always INDIVIDUAL (team contests not supported yet).
     
+    CATEGORY/TAGS:
+    - category_id: Main category ID (required)
+    - subcategory_id: Subcategory ID (optional but recommended)
+    - tags: Comma-separated tag slugs (must be valid for selected subcategory)
+    
     CREDIT REQUIREMENTS:
     - User must have enough credits: prize_pool + platform_fee
     - Platform fee is calculated dynamically from database config
@@ -101,6 +108,8 @@ async def create_contest(
     - Must have at least 1 task to start
     """
     from app.services.contest.contest_fee import ContestFeeService
+    from app.services.forum.category import CategoryService
+    from app.services.forum.tag import TagService
     
     if not current_user:
         return error_response(
@@ -124,6 +133,72 @@ async def create_contest(
         )
     
     db = Database.get_db()
+    category_service = CategoryService(db)
+    tag_service = TagService(db)
+    
+    # Validate category exists and is a parent category (not a subcategory)
+    category = await category_service.get_category_by_id(category_id)
+    if not category:
+        return validation_error_response(
+            message="Invalid category",
+            errors={"category_id": "Category not found"}
+        )
+    
+    if category.get("parent_id"):
+        return validation_error_response(
+            message="Invalid category",
+            errors={"category_id": "Cannot use a subcategory as the main category"}
+        )
+    
+    # Store category name for legacy compatibility
+    category_name = category.get("name", "")
+    
+    # Validate subcategory if provided
+    if subcategory_id:
+        subcategory = await category_service.get_category_by_id(subcategory_id)
+        if not subcategory:
+            return validation_error_response(
+                message="Invalid subcategory",
+                errors={"subcategory_id": "Subcategory not found"}
+            )
+        if subcategory.get("parent_id") != category_id:
+            return validation_error_response(
+                message="Invalid subcategory",
+                errors={"subcategory_id": "Subcategory doesn't belong to the selected category"}
+            )
+    
+    # Validate tags (must be valid for the subcategory)
+    validated_tags = []
+    if tags.strip() and subcategory_id:
+        valid_subcategory_tags = await tag_service.get_tags_by_subcategory(subcategory_id)
+        
+        submitted_tags = [t.strip() for t in tags.split(',') if t.strip()]
+        submitted_tags = list(set(submitted_tags))[:10]  # Max 10 tags
+        
+        invalid_tags = []
+        for tag_input in submitted_tags:
+            tag_input_lower = tag_input.lower()
+            matched_tag = None
+            for tag in valid_subcategory_tags:
+                if tag["slug"] == tag_input or tag["name"].lower() == tag_input_lower:
+                    matched_tag = tag
+                    break
+            
+            if matched_tag:
+                validated_tags.append(matched_tag["slug"])
+            else:
+                invalid_tags.append(f"'{tag_input}' is not valid for this subcategory")
+        
+        if invalid_tags:
+            return validation_error_response(
+                message="Invalid tags provided",
+                errors={"tags": invalid_tags}
+            )
+    elif tags.strip() and not subcategory_id:
+        return validation_error_response(
+            message="Subcategory required for tags",
+            errors={"subcategory_id": "Please select a subcategory to use tags"}
+        )
     user_id = str(current_user["_id"])
     
     # ==========================================
@@ -160,7 +235,10 @@ async def create_contest(
     contest_data = ContestCreate(
         title=title,
         description=description,
-        category=category,
+        category_id=category_id,
+        subcategory_id=subcategory_id,
+        tags=validated_tags,
+        category=category_name,  # Legacy field for backward compatibility
         difficulty=difficulty,
         contest_type=ContestType.INDIVIDUAL,  # Always individual (team not supported yet)
         total_prize=total_prize,
@@ -313,8 +391,13 @@ async def calculate_contest_fees(
 @router.get("")
 async def get_contests(
     status: Optional[ContestStatus] = Query(None),
-    category: Optional[str] = Query(None),
+    category_id: Optional[str] = Query(None, description="Filter by main category ID"),
+    subcategory_id: Optional[str] = Query(None, description="Filter by subcategory ID"),
+    tag: Optional[str] = Query(None, description="Filter by tag slug"),
+    # Legacy parameter for backward compatibility
+    category: Optional[str] = Query(None, description="Legacy: Filter by category name"),
     difficulty: Optional[ContestDifficulty] = Query(None),
+    visibility: str = Query("public", pattern="^(public|all)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     current_user: Optional[dict] = Depends(get_current_user)
@@ -322,9 +405,20 @@ async def get_contests(
     """
     Get all contests with filtering.
     
-    - Anyone can view (public)
-    - Filter by status, category, difficulty
-    - Shows if user joined each contest
+    Filter parameters:
+    - category_id: Filter by main category ID
+    - subcategory_id: Filter by subcategory ID
+    - tag: Filter by tag slug
+    - category: Legacy filter by category name (deprecated, use category_id)
+    
+    Visibility modes:
+    - public (default): Only shows published contests (UPCOMING, ACTIVE, JUDGING, COMPLETED)
+    - all: Shows all contests (admin only - not implemented, defaults to public)
+    
+    Public users can NEVER see:
+    - DRAFT contests
+    - CANCELLED contests
+    - Contests where is_active = False
     """
     db = Database.get_db()
     contest_service = ContestService(db)
@@ -333,32 +427,40 @@ async def get_contests(
     
     contests, total = await contest_service.get_contests(
         status=status,
-        category=category,
+        category_id=category_id,
+        subcategory_id=subcategory_id,
+        tag=tag,
+        category=category,  # Legacy support
         difficulty=difficulty,
         page=page,
         limit=limit,
-        user_id=user_id
+        user_id=user_id,
+        visibility=visibility
     )
     
     # Convert to JSON
     contests_data = [convert_contest_to_json(c) for c in contests]
     
-    # Count by status (use .value to get string values, filter out old contests without owner_id)
-    active_count = await db.contests.count_documents({
-        "status": ContestStatus.ACTIVE.value,
-        "owner_id": {"$exists": True}
+    # Count by status (only public-visible contests)
+    # Active statuses require is_active=True, completed doesn't
+    active_base_filter = {"owner_id": {"$exists": True}, "is_active": True}
+    
+    upcoming_count = await db.contests.count_documents({
+        **active_base_filter,
+        "status": ContestStatus.UPCOMING.value
     })
-    draft_count = await db.contests.count_documents({
-        "status": ContestStatus.DRAFT.value,
-        "owner_id": {"$exists": True}
+    active_count = await db.contests.count_documents({
+        **active_base_filter,
+        "status": ContestStatus.ACTIVE.value
     })
     judging_count = await db.contests.count_documents({
-        "status": ContestStatus.JUDGING.value,
-        "owner_id": {"$exists": True}
+        **active_base_filter,
+        "status": ContestStatus.JUDGING.value
     })
+    # Completed contests are visible regardless of is_active
     completed_count = await db.contests.count_documents({
-        "status": ContestStatus.COMPLETED.value,
-        "owner_id": {"$exists": True}
+        "owner_id": {"$exists": True},
+        "status": ContestStatus.COMPLETED.value
     })
     
     return success_response(
@@ -366,7 +468,7 @@ async def get_contests(
         data={
             "contests": contests_data,
             "counts": {
-                "draft": draft_count,
+                "upcoming": upcoming_count,
                 "active": active_count,
                 "judging": judging_count,
                 "completed": completed_count
@@ -597,7 +699,9 @@ async def update_contest(
     contest_id: str,
     title: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
-    category: Optional[str] = Form(None),
+    category_id: Optional[str] = Form(None, description="Main category ID"),
+    subcategory_id: Optional[str] = Form(None, description="Subcategory ID"),
+    tags: Optional[str] = Form(None, description="Comma-separated tag slugs"),
     difficulty: Optional[ContestDifficulty] = Form(None),
     contest_type: Optional[ContestType] = Form(None),
     total_prize: Optional[float] = Form(None),
@@ -612,7 +716,11 @@ async def update_contest(
     
     - Cannot edit after contest has started
     - All fields optional
+    - category_id, subcategory_id, tags follow the same validation as create
     """
+    from app.services.forum.category import CategoryService
+    from app.services.forum.tag import TagService
+    
     if not current_user:
         return error_response(
             message="Authentication required",
@@ -647,11 +755,93 @@ async def update_contest(
     
     db = Database.get_db()
     contest_service = ContestService(db)
+    category_service = CategoryService(db)
+    tag_service = TagService(db)
+    
+    # Get existing contest for validation
+    existing_contest = await contest_service.get_contest_by_id(contest_id)
+    if not existing_contest:
+        return error_response(message="Contest not found", status_code=404)
+    
+    # Determine effective category and subcategory IDs
+    effective_category_id = category_id or existing_contest.get("category_id")
+    effective_subcategory_id = subcategory_id or existing_contest.get("subcategory_id")
+    
+    category_name = None
+    
+    # Validate category if provided
+    if category_id:
+        category = await category_service.get_category_by_id(category_id)
+        if not category:
+            return validation_error_response(
+                message="Invalid category",
+                errors={"category_id": "Category not found"}
+            )
+        if category.get("parent_id"):
+            return validation_error_response(
+                message="Invalid category",
+                errors={"category_id": "Cannot use a subcategory as the main category"}
+            )
+        category_name = category.get("name", "")
+    
+    # Validate subcategory if provided
+    if subcategory_id:
+        subcategory = await category_service.get_category_by_id(subcategory_id)
+        if not subcategory:
+            return validation_error_response(
+                message="Invalid subcategory",
+                errors={"subcategory_id": "Subcategory not found"}
+            )
+        if subcategory.get("parent_id") != effective_category_id:
+            return validation_error_response(
+                message="Invalid subcategory",
+                errors={"subcategory_id": "Subcategory doesn't belong to the selected category"}
+            )
+    
+    # Validate tags if provided
+    validated_tags = None
+    if tags is not None:
+        if tags.strip() and effective_subcategory_id:
+            valid_subcategory_tags = await tag_service.get_tags_by_subcategory(effective_subcategory_id)
+            
+            submitted_tags = [t.strip() for t in tags.split(',') if t.strip()]
+            submitted_tags = list(set(submitted_tags))[:10]
+            
+            validated_tags = []
+            invalid_tags = []
+            for tag_input in submitted_tags:
+                tag_input_lower = tag_input.lower()
+                matched_tag = None
+                for tag in valid_subcategory_tags:
+                    if tag["slug"] == tag_input or tag["name"].lower() == tag_input_lower:
+                        matched_tag = tag
+                        break
+                
+                if matched_tag:
+                    validated_tags.append(matched_tag["slug"])
+                else:
+                    invalid_tags.append(f"'{tag_input}' is not valid for this subcategory")
+            
+            if invalid_tags:
+                return validation_error_response(
+                    message="Invalid tags provided",
+                    errors={"tags": invalid_tags}
+                )
+        elif tags.strip() and not effective_subcategory_id:
+            return validation_error_response(
+                message="Subcategory required for tags",
+                errors={"subcategory_id": "Please select a subcategory to use tags"}
+            )
+        else:
+            validated_tags = []  # Empty tags
     
     update_data = ContestUpdate(
         title=title,
         description=description,
-        category=category,
+        category_id=category_id,
+        subcategory_id=subcategory_id,
+        tags=validated_tags,
+        category=category_name,  # Legacy field
         difficulty=difficulty,
         contest_type=contest_type,
         total_prize=total_prize,
@@ -750,16 +940,22 @@ async def start_contest(
     )
 
 
-@router.post("/{contest_identifier}/complete")
-async def complete_contest(
+@router.post("/{contest_identifier}/publish")
+async def publish_contest(
     contest_identifier: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Complete a contest (only owner, changes status to COMPLETED).
+    Publish a contest (DRAFT -> UPCOMING).
     
-    - Marks contest as finished
-    - Announces winners
+    Makes the contest visible to the public.
+    Users can join after publishing.
+    Contest will auto-start at start_date.
+    
+    Requirements:
+    - Must be in DRAFT status
+    - Must have at least 1 task
+    - start_date must be in the future
     """
     if not current_user:
         return error_response(
@@ -776,7 +972,7 @@ async def complete_contest(
     
     contest_service = ContestService(db)
     
-    success, message = await contest_service.complete_contest(
+    success, message = await contest_service.publish_contest(
         contest_id=contest_id,
         user_id=str(current_user["_id"])
     )
@@ -786,7 +982,345 @@ async def complete_contest(
     
     return success_response(
         message=message,
-        data={"completed": True}
+        data={"published": True, "status": "upcoming"}
+    )
+
+
+@router.post("/{contest_identifier}/cancel")
+async def cancel_contest(
+    contest_identifier: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Cancel a contest (DRAFT/UPCOMING -> CANCELLED).
+    
+    Only allowed if:
+    - Contest is in DRAFT or UPCOMING status
+    - No participants have joined
+    
+    If prize pool was locked, it will be refunded (minus cancellation fee if applicable).
+    """
+    if not current_user:
+        return error_response(
+            message="Authentication required",
+            status_code=401
+        )
+    
+    db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
+    contest_service = ContestService(db)
+    
+    success, message, refund_details = await contest_service.cancel_contest(
+        contest_id=contest_id,
+        user_id=str(current_user["_id"])
+    )
+    
+    if not success:
+        return error_response(message=message, status_code=400)
+    
+    return success_response(
+        message=message,
+        data={
+            "cancelled": True,
+            "status": "cancelled",
+            "refund": refund_details
+        }
+    )
+
+
+@router.post("/{contest_identifier}/complete")
+async def complete_contest(
+    contest_identifier: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Complete a contest (ACTIVE/JUDGING -> COMPLETED).
+    
+    Requirements:
+    - Must be in ACTIVE or JUDGING status
+    - Must have at least 1 participant
+    - Must have at least 1 submission
+    - Must have at least 1 approved submission
+    
+    Actions:
+    - Calculates final weighted scores
+    - Distributes prizes to winners
+    - Marks contest as completed
+    """
+    if not current_user:
+        return error_response(
+            message="Authentication required",
+            status_code=401
+        )
+    
+    db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
+    contest_service = ContestService(db)
+    
+    # Check if contest can be completed
+    contest = await contest_service.contests.find_one({"_id": ObjectId(contest_id)})
+    if not contest:
+        return error_response(message="Contest not found", status_code=404)
+    
+    # Verify ownership
+    if str(contest["owner_id"]) != str(current_user["_id"]):
+        return error_response(message="Only contest owner can complete", status_code=403)
+    
+    # Validate can complete
+    can_comp, reason, stats = await contest_service.can_complete(contest)
+    if not can_comp:
+        # Include stats in the message for better context
+        if stats:
+            reason = f"{reason} (participants: {stats.get('participants', 0)}, submissions: {stats.get('submissions', 0)}, approved: {stats.get('approved', 0)})"
+        return error_response(
+            message=reason,
+            status_code=400
+        )
+    
+    # Distribute prizes
+    from app.services.contest.prize_distribution import PrizeDistributionService
+    prize_service = PrizeDistributionService(db)
+    
+    dist_success, dist_message, distribution = await prize_service.distribute_prizes(
+        contest_id=contest_id,
+        owner_id=str(current_user["_id"]),
+        distribution_mode="proportional"
+    )
+    
+    if not dist_success:
+        return error_response(message=f"Prize distribution failed: {dist_message}", status_code=400)
+    
+    # Update contest status
+    from datetime import datetime
+    await contest_service.contests.update_one(
+        {"_id": ObjectId(contest_id)},
+        {"$set": {
+            "status": ContestStatus.COMPLETED,
+            "completed_at": datetime.utcnow(),
+            "auto_completed": False,
+            "updated_at": datetime.utcnow()
+        }}
+    )
+    
+    return success_response(
+        message="Contest completed successfully. Prizes distributed.",
+        data={
+            "completed": True,
+            "status": "completed",
+            "distribution": distribution
+        }
+    )
+
+
+@router.get("/{contest_identifier}/scores")
+async def get_contest_scores(
+    contest_identifier: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100)
+):
+    """
+    Get weighted scores for all participants.
+    
+    Returns participants ranked by weighted score with:
+    - Rank
+    - Weighted score
+    - Task-by-task breakdown
+    - Approved tasks count
+    """
+    db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
+    from app.services.contest.scoring import ScoringService
+    scoring_service = ScoringService(db)
+    
+    leaderboard, total = await scoring_service.get_leaderboard(
+        contest_id=contest_id,
+        page=page,
+        limit=limit
+    )
+    
+    return success_response(
+        message="Scores retrieved successfully",
+        data={
+            "scores": leaderboard,
+            "pagination": {
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "total_pages": (total + limit - 1) // limit
+            }
+        }
+    )
+
+
+@router.get("/{contest_identifier}/prize-distribution")
+async def get_prize_distribution_preview(
+    contest_identifier: str,
+    current_user: Optional[dict] = Depends(get_current_user)
+):
+    """
+    Preview prize distribution for the contest.
+    
+    Shows how prizes would be distributed based on current scores.
+    If authenticated, shows user's position.
+    """
+    db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
+    from app.services.contest.prize_distribution import PrizeDistributionService
+    prize_service = PrizeDistributionService(db)
+    
+    user_id = str(current_user["_id"]) if current_user else None
+    
+    preview = await prize_service.get_distribution_preview(
+        contest_id=contest_id,
+        user_id=user_id
+    )
+    
+    if "error" in preview:
+        return error_response(message=preview["error"], status_code=400)
+    
+    return success_response(
+        message="Prize distribution preview",
+        data=preview
+    )
+
+
+@router.get("/{contest_identifier}/task-winners")
+async def get_task_wise_winners(
+    contest_identifier: str
+):
+    """
+    Get winners for each task in the contest.
+    
+    Returns all tasks with their top performers ranked by submission score.
+    Useful for:
+    - Showing task-by-task breakdown
+    - Highlighting best performers per task
+    - Detailed scoring analysis
+    
+    Each task includes:
+    - Task info (title, points, weightage)
+    - Submission counts
+    - Ranked list of approved submissions with scores
+    - Top winner highlighted
+    """
+    try:
+        db = Database.get_db()
+        
+        # Resolve contest identifier to ID
+        contest_id = await resolve_contest_id(contest_identifier, db)
+        if not contest_id:
+            return error_response(message="Contest not found", status_code=404)
+        
+        from app.services.contest.scoring import ScoringService
+        scoring_service = ScoringService(db)
+        
+        task_winners = await scoring_service.get_task_wise_winners(contest_id)
+        
+        # Convert datetime to ISO format for JSON serialization (if not already string)
+        from datetime import datetime as dt
+        for task in task_winners:
+            for winner in task.get("winners", []):
+                if winner.get("submitted_at") and isinstance(winner["submitted_at"], dt):
+                    winner["submitted_at"] = winner["submitted_at"].isoformat()
+                if winner.get("approved_at") and isinstance(winner["approved_at"], dt):
+                    winner["approved_at"] = winner["approved_at"].isoformat()
+            if task.get("top_winner"):
+                if task["top_winner"].get("submitted_at") and isinstance(task["top_winner"]["submitted_at"], dt):
+                    task["top_winner"]["submitted_at"] = task["top_winner"]["submitted_at"].isoformat()
+                if task["top_winner"].get("approved_at") and isinstance(task["top_winner"]["approved_at"], dt):
+                    task["top_winner"]["approved_at"] = task["top_winner"]["approved_at"].isoformat()
+        
+        return success_response(
+            message="Task-wise winners retrieved successfully",
+            data={
+                "tasks": task_winners,
+                "total_tasks": len(task_winners),
+                "summary": {
+                    "tasks_with_winners": sum(1 for t in task_winners if t.get("top_winner")),
+                    "total_approved_submissions": sum(t.get("approved_submissions", 0) for t in task_winners)
+                }
+            }
+        )
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] get_task_wise_winners: {str(e)}")
+        traceback.print_exc()
+        return error_response(message=f"Error retrieving task winners: {str(e)}", status_code=500)
+
+
+@router.get("/{contest_identifier}/tasks/{task_id}/leaderboard")
+async def get_task_leaderboard(
+    contest_identifier: str,
+    task_id: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100)
+):
+    """
+    Get leaderboard for a specific task.
+    
+    Shows all approved submissions for the task ranked by score.
+    Useful for detailed task-level competition view.
+    """
+    db = Database.get_db()
+    
+    # Resolve contest identifier to ID
+    contest_id = await resolve_contest_id(contest_identifier, db)
+    if not contest_id:
+        return error_response(message="Contest not found", status_code=404)
+    
+    from app.services.contest.scoring import ScoringService
+    scoring_service = ScoringService(db)
+    
+    leaderboard, total, task_info = await scoring_service.get_task_leaderboard(
+        contest_id=contest_id,
+        task_id=task_id,
+        page=page,
+        limit=limit
+    )
+    
+    if not task_info:
+        return error_response(message="Task not found", status_code=404)
+    
+    # Convert datetime to ISO format (if not already string)
+    from datetime import datetime as dt
+    for entry in leaderboard:
+        if entry.get("submitted_at") and isinstance(entry["submitted_at"], dt):
+            entry["submitted_at"] = entry["submitted_at"].isoformat()
+        if entry.get("approved_at") and isinstance(entry["approved_at"], dt):
+            entry["approved_at"] = entry["approved_at"].isoformat()
+    
+    return success_response(
+        message="Task leaderboard retrieved successfully",
+        data={
+            "task": task_info,
+            "leaderboard": leaderboard,
+            "pagination": {
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "total_pages": (total + limit - 1) // limit
+            }
+        }
     )
 
 
@@ -971,13 +1505,17 @@ async def get_contest_participants(
     participants = await db.contest_participants.aggregate(pipeline).to_list(length=limit)
     total = await db.contest_participants.count_documents({"contest_id": contest_id})
     
-    # Convert to JSON
+    # Convert to JSON-serializable format
     participants_data = []
     for p in participants:
         p["id"] = str(p["_id"])
         del p["_id"]
-        if p.get("joined_at"):
-            p["joined_at"] = p["joined_at"].isoformat()
+        # Convert all datetime fields
+        for key, value in list(p.items()):
+            if isinstance(value, datetime):
+                p[key] = value.isoformat()
+            elif isinstance(value, ObjectId):
+                p[key] = str(value)
         # Ensure user fields are always present
         if "full_name" not in p:
             p["full_name"] = None
@@ -1376,3 +1914,69 @@ async def get_task_completion_widget(contest_identifier: str):
             "total_tasks": len(task_stats)
         }
     )
+
+
+# ============================================================================
+# SCHEDULER / SYSTEM ENDPOINTS
+# ============================================================================
+
+@router.get("/system/scheduler-status")
+async def get_scheduler_status():
+    """
+    Get contest scheduler status (for monitoring).
+    
+    Shows:
+    - Scheduler running status
+    - Configured jobs and next run times
+    - Recent job execution stats
+    """
+    try:
+        from app.core.scheduler import get_scheduler_status as get_status
+        status = get_status()
+        return success_response(
+            message="Scheduler status retrieved",
+            data=status
+        )
+    except ImportError:
+        return error_response(
+            message="Scheduler not available",
+            status_code=503
+        )
+
+
+@router.post("/system/run-scheduler")
+async def run_scheduler_manually(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Manually trigger all scheduler jobs (admin only - for testing).
+    
+    Runs:
+    - auto_start_contests
+    - transition_to_judging
+    - auto_complete_contests
+    """
+    if not current_user:
+        return error_response(
+            message="Authentication required",
+            status_code=401
+        )
+    
+    # TODO: Add admin check here
+    
+    try:
+        db = Database.get_db()
+        from app.services.scheduler.contest_scheduler import ContestScheduler
+        
+        scheduler = ContestScheduler(db)
+        results = await scheduler.run_all_jobs()
+        
+        return success_response(
+            message="Scheduler jobs executed",
+            data=results
+        )
+    except Exception as e:
+        return error_response(
+            message=f"Scheduler execution failed: {str(e)}",
+            status_code=500
+        )

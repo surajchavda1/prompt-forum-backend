@@ -596,12 +596,17 @@ async def get_submission_history(
 async def review_submission(
     submission_id: str,
     status: SubmissionStatus = Form(...),
-    feedback: Optional[str] = Form(None),
-    score: Optional[int] = Form(None, ge=0, le=100),
+    feedback: str = Form(..., min_length=5, description="Review feedback (required)"),
+    score: int = Form(..., ge=0, le=100, description="Score 0-100 (required)"),
     current_user: dict = Depends(get_current_user)
 ):
     """
     Review a submission (approve/reject/request revision).
+    
+    REQUIRED FIELDS:
+    - status: approved/rejected/revision_requested
+    - feedback: Required feedback (min 5 chars)
+    - score: Required score 0-100
     
     SECURITY:
     - Only contest owner
